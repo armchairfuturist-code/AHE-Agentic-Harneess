@@ -12,8 +12,8 @@ switch($cmd){
   audit{& $s\security-audit.ps1}
   cleanup{& $s\full-cleanup.ps1}
   optimize{& $s\optimize-system.ps1}
-  update{& $s\update-plugins.ps1}
-  mcpmodel{& $s\update-crofai-models.ps1}
+  update{& "$env:USERPROFILE\Scripts\update-plugins.ps1"}
+  mcpmodel{& "$env:USERPROFILE\Scripts\update-crofai-models.ps1"}
   measure{& $s\measure-pc.ps1}
   pcauto{& $s\pc-autoresearch.ps1}
   validate{& $s\validate-settings.ps1}

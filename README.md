@@ -34,5 +34,17 @@ sync-obsidian, update-plugins, update-crofai-models.
 .\ahe-pipeline\self-heal.bat
 ```
 
+## autocontext Integration
+
+The pipeline integrates [autocontext](https://github.com/greyhaven-ai/autocontext) (greyhaven-ai) as a Qwen Code MCP server.
+
+### What it provides
+- **Knowledge compounding** — benchmark results exported to autocontext-readable format
+- **Playbook accumulation** — cross-session knowledge via autocontext knowledge dirs
+- **5-role evaluation** — autocontext MCP tools available as `autocontext_*` tools in Qwen Code
+
+### Setup
+Configured in `settings.json` MCP servers. Uses crof.ai OpenAI-compatible provider with `deepseek-v4-pro-precision`.
+
 ## License
 MIT

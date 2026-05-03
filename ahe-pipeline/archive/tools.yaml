@@ -1,0 +1,11 @@
+sources:
+- name: local-demo
+  type: sqlite
+  # In-memory SQLite demo - no server needed
+  connection:
+    dsn: ":memory:"
+
+tools:
+- name: list_tables
+  description: List all tables in the database
+  sql: "SELECT name FROM sqlite_master WHERE type="table""

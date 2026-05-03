@@ -1,4 +1,4 @@
-# Qwen Code Plugin & Extension Update Manager
+﻿# Qwen Code Plugin & Extension Update Manager
 # Intelligent script to detect, check, and update Qwen Code, GSD, CE plugins, and related projects
 #
 # Usage:
@@ -252,6 +252,7 @@ function Update-Qwen {
             if ($exit -eq 0) {
                 $newVer = Get-QwenCurrentVersion
                 Write-Result "Updated to $newVer" $true
+
                 Write-Log "Qwen Code updated: $currentVer -> $newVer"
             } else {
                 Write-Result "npm install failed (exit $exit): $($output -join '; ')" $false
@@ -290,6 +291,26 @@ function Get-GSDLatestVersion {
     return $null
 }
 
+function Sync-GSD {
+    param([string]$LatestVer)
+    Write-Host "  Syncing GSD to Qwen Code path..."
+    try {
+        $src = "$env:USERPROFILE\.claude\get-shit-done"
+        $dst = "$env:USERPROFILE\.qwen\get-shit-done"
+        if (Test-Path "$src\VERSION") {
+            # Backup current Qwen GSD first
+            if (Test-Path $dst) {
+                Copy-Item -Path "$dst\*" -Destination "$dst-backup" -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force
+            Write-Result "Synced from .claude to Qwen Code (v$LatestVer)" $true
+        } else {
+            Write-Result "Source not found at $src" $false
+        }
+    } catch {
+        Write-Result "GSD sync failed: $_" $false
+    }
+}
 function Update-GSD {
     param([bool]$CheckOnly, [bool]$Force)
 
@@ -329,6 +350,7 @@ function Update-GSD {
             if ($exit -eq 0) {
                 $newVer = Get-GSDCurrentVersion
                 Write-Result "Updated to $newVer" $true
+                Sync-GSD -LatestVer $newVer
                 Write-Log "GSD updated: $currentVer -> $newVer"
             } else {
                 Write-Result "GSD update failed (exit $exit): $($output -join '; ')" $false
@@ -507,6 +529,7 @@ function Update-CE {
 
             $newVer = Get-CECurrentVersion
             Write-Result "Updated to $newVer" $true
+                
             Write-Log "CE updated: $currentVer -> $newVer"
             Write-Color "  !! Restart Qwen Code to load the updated extension" -Color $Colors.Warning
 

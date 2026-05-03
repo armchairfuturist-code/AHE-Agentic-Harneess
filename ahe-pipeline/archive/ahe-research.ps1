@@ -1,40 +1,28 @@
 Write-Host "=== Phase: AHE Research ===" -ForegroundColor Cyan
 
-$pyScript = "C:\Users\Administrator\Scripts\archive\ahe-research-module.py"
-if (-not (Test-Path $pyScript)) {
-    Write-Host "  ERROR: Research module not found at $pyScript" -ForegroundColor Red
-    return
-}
+$pyModule = "C:\Users\Administrator\Scripts\archive\ahe-research-module.py"
+$pyEval = "C:\Users\Administrator\Scripts\archive\ahe-evaluate-candidates.py"
+$pyReport = "C:\Users\Administrator\Scripts\archive\ahe-report-generator.py"
 
-Write-Host "  Searching for new MCPs, tools, and config gaps..." -ForegroundColor Gray
-$result = & python $pyScript 2>&1 | Out-String
+# Step 1: Research — find new MCPs, tools, gaps
+Write-Host "  [1/3] Searching for new MCPs, tools, and config gaps..." -ForegroundColor Gray
+$result = & python $pyModule 2>&1 | Out-String
+if (-not $result) { Write-Host "  ERROR: Research module failed" -ForegroundColor Red; return }
 
-if (-not $result) {
-    Write-Host "  ERROR: Research module returned nothing" -ForegroundColor Red
-    return
-}
+# Step 2: Evaluate — score and rank candidates
+Write-Host "  [2/3] Evaluating and scoring candidates..." -ForegroundColor Gray
+$evalResult = & python $pyEval 2>&1 | Out-String
+if (-not $evalResult) { Write-Host "  ERROR: Evaluation module failed" -ForegroundColor Red; return }
 
+# Step 3: Report — generate human-readable markdown to Obsidian
+Write-Host "  [3/3] Generating report to Obsidian vault..." -ForegroundColor Gray
+$reportResult = & python $pyReport 2>&1 | Out-String
 try {
-    $json = $result | ConvertFrom-Json
-    Write-Host "  Found $($json.summary.mcps) MCP candidates, $($json.summary.tools) tool candidates, $($json.summary.gaps) gaps" -ForegroundColor Cyan
-    
-    if ($json.mcps.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Top MCP candidates:" -ForegroundColor Cyan
-        $json.mcps | Sort-Object stars -Descending | Select-Object -First 8 | ForEach-Object {
-            Write-Host "    ($($_.stars)*) $($_.name)" -ForegroundColor Green
-            Write-Host "       $($_.desc)" -ForegroundColor Gray
-        }
-    }
-    if ($json.gaps.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Config gaps:" -ForegroundColor Yellow
-        $json.gaps | ForEach-Object {
-            Write-Host "    [FAIL] $($_.test): $($_.detail)" -ForegroundColor Yellow
-        }
-    }
+    $r = $reportResult | ConvertFrom-Json
+    Write-Host "  Report written: $($r.report)" -ForegroundColor Green
+    Write-Host "  Candidates evaluated: $($r.candidates)" -ForegroundColor Cyan
 } catch {
-    Write-Host "  ERROR parsing research results: $_" -ForegroundColor Red
+    Write-Host "  Report generated (see Obsidian vault)" -ForegroundColor Green
 }
 
 Write-Host "  Research complete" -ForegroundColor Cyan

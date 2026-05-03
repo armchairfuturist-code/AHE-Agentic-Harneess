@@ -20,6 +20,7 @@ function Write-Section {
 "Machine: $env:COMPUTERNAME | User: $env:USERNAME" | Out-File $reportFile -Append
 
 # Startup Items
+Write-Host "  [1/8] Checking startup items..." -ForegroundColor Gray
 Write-Section "STARTUP ITEMS"
 "Registry (HKCU\Run):" | Out-File $reportFile -Append
 Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue |
@@ -44,6 +45,7 @@ Get-ScheduledTask | Where-Object { $_.State -ne "Disabled" } | ForEach-Object {
 } | Out-File $reportFile -Append
 
 # Firewall Rules
+Write-Host "  [2/8] Checking firewall rules..." -ForegroundColor Gray
 Write-Section "NON-DEFAULT FIREWALL RULES (Inbound Allow)"
 Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True |
     Where-Object { $_.Group -notlike "@*" -and $_.Group -notlike "Core Networking*" } |
@@ -52,6 +54,7 @@ Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True |
     }} | Format-Table -AutoSize | Out-String | Out-File $reportFile -Append
 
 # Local Users
+Write-Host "  [3/8] Checking user accounts..." -ForegroundColor Gray
 Write-Section "LOCAL USER ACCOUNTS & GROUP MEMBERSHIPS"
 Get-LocalUser | ForEach-Object {
     $user = $_
@@ -66,6 +69,7 @@ Get-LocalUser | ForEach-Object {
 } | Out-File $reportFile -Append
 
 # Pending Updates
+Write-Host "  [4/8] Checking pending updates..." -ForegroundColor Gray
 Write-Section "PENDING WINDOWS UPDATES"
 try {
     $session = New-Object -ComObject Microsoft.Update.Session
@@ -83,6 +87,7 @@ try {
 }
 
 # BitLocker Status
+Write-Host "  [5/8] Checking BitLocker..." -ForegroundColor Gray
 Write-Section "BITLOCKER STATUS"
 try {
     Get-BitLockerVolume -ErrorAction Stop | ForEach-Object {
@@ -93,6 +98,7 @@ try {
 }
 
 # Defender Status
+Write-Host "  [6/8] Checking Windows Defender..." -ForegroundColor Gray
 Write-Section "WINDOWS DEFENDER STATUS"
 Get-MpComputerStatus -ErrorAction SilentlyContinue |
     Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated,
@@ -100,9 +106,11 @@ Get-MpComputerStatus -ErrorAction SilentlyContinue |
     Format-List | Out-String | Out-File $reportFile -Append
 
 # Open Ports
+Write-Host "  [7/8] Checking listening ports..." -ForegroundColor Gray
 Write-Section "LISTENING PORTS"
 Get-NetTCPConnection -State Listen | Sort-Object LocalPort |
     Select-Object LocalPort, @{N='Process';E={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} |
     Format-Table -AutoSize | Out-String | Out-File $reportFile -Append
 
+Write-Host "  [8/8] Writing report..." -ForegroundColor Gray
 Write-Host "Security audit saved to: $reportFile" -ForegroundColor Green

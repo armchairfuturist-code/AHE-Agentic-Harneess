@@ -103,9 +103,8 @@ function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out
 function Invoke-AgentDebugger {
     Write-Host "`n=== Phase: Agent Debugger ===" -ForegroundColor Cyan
 
-    \$debugger = "\$ScriptsDir\archive\agent-debugger.ps1"
+    $debugger = "$ScriptsDir\archive\agent-debugger.ps1"
     if (-not (Test-Path $debugger)) {
-        Log "WARNING: agent-debugger.ps1 not found at $debugger"
         return $null
     }
 

@@ -147,8 +147,10 @@ function Invoke-McpVerification {
 . "$ScriptsDir\archive\ahe-evolve-module.ps1"
 
 function Invoke-Discovery {
-    # Delegate to module version (ahe-evolve-module.ps1)
-    return & { $c = @(); return $c }
+    # Research phase: find new MCPs, tools, and config gaps
+    try { & "C:\Users\Administrator\Scripts\archive\ahe-research.ps1" } catch { Write-Host "  Research failed: $_" -ForegroundColor Red }
+    # Module version (ahe-evolve-module.ps1) handles actual discovery
+    return @()
 }function Invoke-Benchmark {
     param($Candidates, $Runs = 3)
     Write-Host "`n=== Phase 1: Benchmark ===" -ForegroundColor Cyan

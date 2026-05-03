@@ -103,7 +103,7 @@ function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out
 function Invoke-AgentDebugger {
     Write-Host "`n=== Phase: Agent Debugger ===" -ForegroundColor Cyan
 
-    $debugger = "$ScriptsDir\agent-debugger.ps1"
+    $debugger = "$ScriptsDir\archive\agent-debugger.ps1"
     if (-not (Test-Path $debugger)) {
         Log "WARNING: agent-debugger.ps1 not found at $debugger"
         return $null
@@ -126,7 +126,7 @@ function Invoke-AgentDebugger {
 # ═══════════════════════════════════════════════════════════════
 function Invoke-McpVerification {
     Write-Host "=== MCP Server Verification ===" -ForegroundColor Cyan
-    $verifier = "$ScriptsDir\verify-mcps.ps1"
+    $verifier = "$ScriptsDir\archive\verify-mcps.ps1"
     if (-not (Test-Path $verifier)) { Log "verify-mcps.ps1 not found"; return $false }
     $passed = 0; $failed = 0; $servers = @()
     . $verifier
@@ -261,7 +261,7 @@ function Invoke-Benchmark {
     param($Candidates, $Runs = 3)
     Write-Host "`n=== Phase 1: Benchmark ===" -ForegroundColor Cyan
 
-    $benchmarker = "$ScriptsDir\benchmark-system.ps1"
+    $benchmarker = "$ScriptsDir\benchmark.ps1"
     if (-not (Test-Path $benchmarker)) {
         Log "ERROR: benchmark-system.ps1 not found at $benchmarker"
         return $false

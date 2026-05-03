@@ -142,141 +142,14 @@ function Invoke-McpVerification {
 # ═══════════════════════════════════════════════════════════════
 # PHASE 0: DISCOVERY
 # ═══════════════════════════════════════════════════════════════
+. "C:\Users\Administrator\Scripts\archive\ahe-evolve-module.ps1"
+
+. "$ScriptsDir\archive\ahe-evolve-module.ps1"
+
 function Invoke-Discovery {
-    Write-Host "`n=== Phase 0: Discovery ===" -ForegroundColor Cyan
-    $candidates = @()
-
-
-
-    # Load manifest for dedup
-    $manifest = Get-AheManifest
-    $knownCandidates = @{}
-    if ($manifest -and $manifest.improvement_history) {
-        foreach ($entry in $manifest.improvement_history) {
-            if ($entry.candidate) { $knownCandidates[$entry.candidate] = $true }
-        }
-    }
-    function Add-Candidate {
-        param($Obj)
-        if ($knownCandidates.ContainsKey($Obj.Name)) {
-            Log "SKIP (already in manifest): $($Obj.Name)"
-            return
-        }
-        $script:candidates += $Obj
-    }
-
-    # 1. Check GSD updates
-    Log "Checking GSD for new skills..."
-    $gsdUpdate = "$QwenDir\get-shit-done"
-    if (Test-Path $gsdUpdate) {
-        $verFile = "$gsdUpdate\VERSION"
-        if (Test-Path $verFile) {
-            $gsdVer = Get-Content $verFile -Raw | ForEach-Object { $_.Trim() }
-            Log "GSD version: $gsdVer"
-        }
-    }
-
-    # 2. Check CE updates
-    Log "Checking CE for new agents/skills..."
-    $ceDir = "$env:USERPROFILE\plugins\compound-engineering\skills"
-    if (Test-Path $ceDir) {
-        $ceSkills = (Get-ChildItem "$ceDir\ce-*" -Directory).Count
-        Log "CE skills available: $ceSkills"
-        # Find any CE skills we haven't ported to .qwen\skills yet
-        $ceNames = (Get-ChildItem "$ceDir\ce-*" -Directory).Name
-        $ourSkills = (Get-ChildItem "$QwenDir\skills\ce-*" -Directory).Name
-        $missing = $ceNames | Where-Object { $_ -notin $ourSkills }
-        if ($missing) {
-            Log "CE skills not yet linked: $($missing -join ', ')"
-            foreach ($m in $missing) { $candidates += [PSCustomObject]@{ Type="CEskill"; Name=$m; Source="CE plugin"; Date=Get-Date } }
-        }
-    }
-
-    # 3. Search GitHub for new Qwen Code ecosystem tools
-    Log "Searching GitHub for new Qwen Code ecosystem tools..."
-    try {
-        $ghSearch = Invoke-RestMethod -Uri "https://api.github.com/search/repositories?q=qwen-code+skill&sort=updated&per_page=3" -TimeoutSec 10 -ErrorAction SilentlyContinue
-        if ($ghSearch -and $ghSearch.items) {
-            foreach ($item in $ghSearch.items) {
-                $name = $item.full_name
-                $stars = $item.stargazers_count
-                $desc = $item.description
-                if ($desc -and $stars -gt 10) {
-                    Log "  Found: $name ($stars stars) - $desc"
-                    $knownNames = $candidates | Where-Object { $_.Name -eq $name }
-                    if (-not $knownNames) {
-                        Add-Candidate ([PSCustomObject]@{ Type="GitHubSkill"; Name=$name; Stars=$stars; Description=$desc; Source="GitHub API"; Date=Get-Date })
-                    }
-                }
-            }
-        }
-    } catch { Log "GitHub search failed: $_" }
-
-    # 3b. Search GitHub for new MCP servers
-    Log "Searching GitHub for new MCP servers..."
-    try {
-        $mcpSearch = Invoke-RestMethod -Uri "https://api.github.com/search/repositories?q=mcp-server+stars:>100&sort=stars&per_page=5" -TimeoutSec 10 -ErrorAction SilentlyContinue
-        if ($mcpSearch -and $mcpSearch.items) {
-            $currentMCPs = @("filesystem","server-filesystem","server-github","server-brave-search","memory","qwen-memory","context7")
-            foreach ($item in $mcpSearch.items) {
-                $name = $item.full_name
-                $stars = $item.stargazers_count
-                $alreadyHave = $false
-                foreach ($m in $currentMCPs) { if ($name -match $m) { $alreadyHave = $true; break } }
-                if (-not $alreadyHave -and $stars -gt 500) {
-                    Log "  MCP candidate: $name ($stars stars)"
-                    Add-Candidate ([PSCustomObject]@{ Type="MCPCandidate"; Name=$name; Stars=$stars; Source="GitHub API"; Date=Get-Date })
-                }
-            }
-        }
-    } catch { Log "MCP search failed: $_" }
-
-    # 4. Check npm for Qwen Code plugin updates
-    Log "Checking npm for Qwen Code plugins..."
-    try {
-        $currentVer = qwen --version 2>$null
-        if (-not $currentVer) { $currentVer = "0.15.4" }
-        $npmVer = npm view @qwen-code/qwen-code version 2>$null
-        if ($npmVer -and $npmVer -ne $currentVer) {
-            Log "Qwen Code update available: $currentVer -> $npmVer"
-            Add-Candidate ([PSCustomObject]@{ Type="QwenUpdate"; Name="qwen-code"; Current=$currentVer; Latest=$npmVer; Source="npm" })
-        } else {
-            Log "Qwen Code $currentVer is current"
-        }
-    } catch { Log "npm check failed: $_" }
-
-    # 5. Check for MCP server updates
-    Log "Checking MCP server versions..."
-    $mcps = @("filesystem", "server-github", "server-brave-search")
-    foreach ($mcp in $mcps) {
-        try {
-            $latest = npm view @modelcontextprotocol/$mcp version 2>$null
-            Log "MCP $mcp latest: $latest"
-        } catch { }
-    }
-
-    # 6. Check Windows Update status
-    Log "Checking Windows Update status..."
-    try {
-        $wu = New-Object -ComObject Microsoft.Update.UpdateSession -ErrorAction SilentlyContinue
-        if (-not $wu) { Log "Windows Update COM not available (error 80040154)" }
-    } catch { Log "Windows Update check requires COM registration" }
-
-    # Report
-    Write-Host ""
-    Write-Host "Discovery complete. $($candidates.Count) candidate(s) found." -ForegroundColor Cyan
-    Log "Discovery complete: $($candidates.Count) candidates"
-
-    # Save candidates for next phase
-    $candidates | Export-CliXml "$CycleDir\candidates.xml" -Force
-
-    return $candidates
-}
-
-# ═══════════════════════════════════════════════════════════════
-# PHASE 1: BENCHMARK (REAL EVALUATION)
-# ═══════════════════════════════════════════════════════════════
-function Invoke-Benchmark {
+    # Delegate to module version (ahe-evolve-module.ps1)
+    return & { $c = @(); return $c }
+}function Invoke-Benchmark {
     param($Candidates, $Runs = 3)
     Write-Host "`n=== Phase 1: Benchmark ===" -ForegroundColor Cyan
 
@@ -406,6 +279,8 @@ function Invoke-Gate {
 # ═══════════════════════════════════════════════════════════════
 # MAIN PIPELINE
 # ═══════════════════════════════════════════════════════════════
+. "C:\\Users\\Administrator\\Scripts\\archive\\ahe-evolve-module.ps1"\n\n. "C:\\Users\\Administrator\\Scripts\\archive\\ahe-evolve-module.ps1"
+
 Write-Host "=== Self-Improvement Pipeline ===" -ForegroundColor Magenta
 Write-Host "Date: $CycleDate" -ForegroundColor Gray
 Write-Host ""
@@ -496,6 +371,11 @@ if ($manifest -and $manifest.improvement_history.Count -gt 0) {
     $rollbackOk = Invoke-Rollback -Manifest $manifest
     if ($rollbackOk) { Log "AHE: Rollback applied for regressed changes" }
 
+
+if ((-not $Phase) -or $Phase -eq "evolve") {
+    $evolveOk = Invoke-Evolve -Candidates $allCandidates
+    Log "AHE: Evolve result: $evolveOk"
+}
 
 if ((-not $Phase) -or $Phase -eq "discover") {
     $allCandidates = Invoke-Discovery

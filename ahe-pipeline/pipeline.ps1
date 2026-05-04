@@ -299,7 +299,8 @@ function Invoke-Gate {
     foreach($d in @("$env:USERPROFILE\.qwen\settings.json","$env:USERPROFILE\.autoresearch\ahe-manifest.json","$env:USERPROFILE\.autoresearch\benchmarks","$env:USERPROFILE\.autoresearch\backups")){if(Test-Path $d){$pass++}else{$fail++}}
     Write-Host "  AHE Pipeline: $pass/$($pass+$fail) checks passed" -ForegroundColor $(if($fail-eq0){"Green"}else{"Yellow"})
     return ($fail -eq 0)
-}function Invoke-Compound {
+}
+Invoke-Compound {
     param($Candidates, $BenchmarkPassed, $GatesPassed)
     Write-Host "`n=== Phase 3: Compound ===" -ForegroundColor Cyan
 
@@ -668,13 +669,26 @@ if ((-not $Phase) -or $Phase -eq "verify") {
     $mcpsPassed = Invoke-McpVerification
     Log "AHE: MCP Verification result: $mcpsPassed"
 }
-
-if ((-not $Phase) -or $Phase -eq "compound") {
+    Invoke-Swarm -Goal "Optimize AHE harness with multi-model routing"
     Invoke-Compound -Candidates $allCandidates -BenchmarkPassed $benchmarkPassed -GatesPassed $gatesPassed
 }
 
 Write-Host ""
 Write-Host "=== Self-Improvement Complete ===" -ForegroundColor Magenta
 Log "Cycle complete. Log: $LogFile"
+
+# Phase 3: Swarm / Ralph Loop
+function Invoke-Swarm {
+    param([string]$Goal)
+    Write-Host "`n=== Phase: Swarm / Ralph Loop ===" -ForegroundColor Cyan
+    $py = "C:\Users\Administrator\Scripts\archive\ahe-ralph-loop.py"
+    if (-not (Test-Path $py)) {
+        Log "WARNING: ralph-loop.py not found - skipping swarm phase"
+        return
+    }
+    Log "Running Ralph loop with goal: $Goal"
+    $result = & python $py $Goal 2>&1 | Out-String
+    Log "Ralph loop complete"
+}
 
 

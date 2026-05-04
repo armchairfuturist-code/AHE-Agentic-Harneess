@@ -220,7 +220,7 @@ No rewrite was needed -- the .bat was already in this state when the audit disco
 - **To scale up:** increase max_workers in parallel dispatch, add model-specific rate limit handling
 - **Ralph loop:** while-not-done persistent execution with judge verification per iteration
 - **Natural language trigger:** `/swarm <goal>` or mention swarm for complex tasks
-- **Smoke test passed:** 4 agents in 12.2s (3.3x speedup vs sequential)
+- **Smoke test passed:** 4 agents in 12.2s, **12 agents in 9.5s** (no rate limits, zero failures)
 - **Model routing per role:** Code/Evolve → DeepSeek V4 Pro, Debugger/Judge → Kimi K2.6, Verify → Flash
 - **Pipeline integration:** Invoke-Swarm phase runs after MCP verification
 - **Files:** archive/ahe-smoke-test.py, archive/ahe-ralph-loop.py, archive/ahe-model-router.py

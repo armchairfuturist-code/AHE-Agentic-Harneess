@@ -37,7 +37,7 @@ if "%C%"=="7" %PS% "%S%\tools.ps1" sync
 if "%C%"=="8" %PS% "%S%\tools.ps1" tokens
 if "%C%"=="9" %PS% "%S%\tools.ps1" cleanup
 if "%C%"=="10" %PS% "%S%\tools.ps1" audit
-if "%C%"=="11" %PS% "%S%\tools.ps1" integrity
+if "%C%"=="11" %PS% "%S%\archive\integrity-check.ps1" -Quick
 if "%C%"=="12" %PS% "%S%\tools.ps1" check
 if "%C%"=="13" %PS% "%S%\tools.ps1" optimize
 if "%C%"=="14" %PS% "%S%\tools.ps1" game-mode

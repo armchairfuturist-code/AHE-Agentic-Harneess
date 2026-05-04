@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Self-Improvement Pipeline — discovers, benchmarks, gates, integrates, and compounds improvements
 .DESCRIPTION
@@ -40,35 +40,50 @@ if (-not (Test-Path $CycleDir)) { New-Item -ItemType Directory -Path $CycleDir -
 # ═══════════════════════════════════════════════════════════════
 function Get-AheManifest {
     if (Test-Path $AheManifest) {
-        return Get-Content $AheManifest -Raw | ConvertFrom-Json
+        $m = Get-Content $AheManifest -Raw | ConvertFrom-Json
+        # Ensure best_score exists (needed for Best-So-Far Gate)
+        if ($null -eq $m.best_score) { $m | Add-Member -NotePropertyName "best_score" -NotePropertyValue $null -Force }
+        return $m
     }
     return $null
 }
 
 function Save-AheManifest {
     param($Manifest)
-    $Manifest | ConvertTo-Json -Depth 10 -Compress | Set-Content $AheManifest
+    try {
+        $json = $Manifest | ConvertTo-Json -Depth 10 -Compress -ErrorAction Stop
+        $json | Set-Content $AheManifest -ErrorAction Stop
+        Log "Manifest saved: $($Manifest.improvement_history.Count) entries ($($json.Length) bytes)"
+    } catch {
+        Log "ERROR saving manifest: $_"
+        Write-Host "  ERROR saving manifest: $_" -ForegroundColor Red
+    }
 }
 
 function Add-AheIteration {
     param($Manifest, $Candidate, $Prediction, $Verification)
     if (-not $Manifest.improvement_history) { $Manifest.improvement_history = @() }
-    $entry = [PSCustomObject]@{
-        iteration = $Manifest.improvement_history.Count + 1
-        date = Get-Date -Format "yyyy-MM-dd HH:mm"
-        candidate = $Candidate
-        type = $Prediction.type
-        component = $Prediction.component
-        prediction = $Prediction
-        verification = $Verification
+    try {
+        $entry = [PSCustomObject]@{
+            iteration = $Manifest.improvement_history.Count + 1
+            date = Get-Date -Format "yyyy-MM-dd HH:mm"
+            candidate = $Candidate
+            type = $Prediction.type
+            component = $Prediction.component
+            prediction = $Prediction
+            verification = $Verification
+        }
+        $a = [System.Collections.ArrayList]$Manifest.improvement_history
+        $a.Add($entry) | Out-Null
+        $Manifest.improvement_history = $a
+        $Manifest.cycle_count = $a.Count
+        $Manifest.last_cycle = (Get-Date -Format "yyyy-MM-dd HH:mm")
+        Save-AheManifest $Manifest
+        return $entry
+    } catch {
+        Log "ERROR in Add-AheIteration: $_"
+        return $null
     }
-    $a = [System.Collections.ArrayList]$Manifest.improvement_history
-    $a.Add($entry) | Out-Null
-    $Manifest.improvement_history = $a
-    $Manifest.cycle_count = $a.Count
-    $Manifest.last_cycle = (Get-Date -Format "yyyy-MM-dd HH:mm")
-    Save-AheManifest $Manifest
-    return $entry
 }
 
 function New-Prediction {
@@ -96,6 +111,7 @@ function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out
 
 # Dot-source backup/rollback module
 . "$ScriptsDir\ahe-backup-rollback.ps1"
+. "$ScriptsDir\ahe-candidate-eval.ps1"
 
 # ═══════════════════════════════════════════════════════════════
 # PHASE: AGENT DEBUGGER (Layered Evidence Distillation)
@@ -141,16 +157,78 @@ function Invoke-McpVerification {
 # ═══════════════════════════════════════════════════════════════
 # PHASE 0: DISCOVERY
 # ═══════════════════════════════════════════════════════════════
-. "C:\Users\Administrator\Scripts\archive\ahe-evolve-module.ps1"
 
 . "$ScriptsDir\archive\ahe-evolve-module.ps1"
 
 function Invoke-Discovery {
     # Research phase: find new MCPs, tools, and config gaps
-    try { & "C:\Users\Administrator\Scripts\archive\ahe-research.ps1" } catch { Write-Host "  Research failed: $_" -ForegroundColor Red }
-    # Module version (ahe-evolve-module.ps1) handles actual discovery
-    return @()
-}function Invoke-Benchmark {
+    try { & "$ScriptsDir\archive\ahe-research.ps1" } catch { Write-Host "  Research failed: $_" -ForegroundColor Red }
+
+    # Read scored candidates from knowledge directory (ahe-evaluate-candidates.py output)
+    $knowledgeFile = "$env:USERPROFILE\.autoresearch\knowledge\candidate-evaluations.json"
+    $knownNames = @{}
+    if ($manifest -and $manifest.improvement_history) {
+        foreach ($entry in $manifest.improvement_history) {
+            if ($entry.candidate) { $knownNames[$entry.candidate] = $true }
+        }
+    }
+
+    $scoredCandidates = @()
+    if (Test-Path $knowledgeFile) {
+        try {
+            $evalData = Get-Content $knowledgeFile -Raw | ConvertFrom-Json
+            if ($evalData.scored -and $evalData.scored.Count -gt 0) {
+                $sorted = $evalData.scored | Sort-Object score -Descending
+                foreach ($c in $sorted) {
+                    if (-not $knownNames.ContainsKey($c.name)) {
+                        $scoredCandidates += [PSCustomObject]@{
+                            Type = "MCPCandidate"
+                            Name = $c.name
+                            Stars = $c.stars
+                            Score = $c.score
+                            Category = $c.category
+                            Description = $c.desc
+                            GapNeed = $c.gap_name.need
+                            GapWeight = $c.gap_name.weight
+                            Source = "knowledge-eval"
+                            Date = Get-Date
+                        }
+                        $knownNames[$c.name] = $true
+                    }
+                }
+                if ($scoredCandidates.Count -gt 0) {
+                Log "Discovery: $($evalData.scored.Count) total, $($scoredCandidates.Count) new after dedup (best: $($sorted[0].name) @ $($sorted[0].score)/100)"
+            } else {
+                Log "Discovery: $($evalData.scored.Count) total, $($scoredCandidates.Count) new after dedup"
+            }
+            }
+        } catch {
+            Log "WARNING: Could not read candidate-evaluations.json: $_"
+        }
+    }
+
+    # Also read research-findings.json for gap analysis context
+    $findingsFile = "$env:USERPROFILE\.autoresearch\knowledge\research-findings.json"
+    if (Test-Path $findingsFile) {
+        try {
+            $findings = Get-Content $findingsFile -Raw | ConvertFrom-Json
+            if ($findings.gaps -and $findings.gaps.Count -gt 0) {
+                Log "Gap analysis: $($findings.gaps.Count) gaps identified"
+                foreach ($g in $findings.gaps) {
+                    Log "  Gap: $($g.test) — $($g.detail)"
+                }
+            }
+        } catch {}
+    }
+
+    if ($scoredCandidates.Count -eq 0) {
+        Log "Discovery: No new candidates found (all known or none scored)"
+    }
+
+    return $scoredCandidates
+}
+
+function Invoke-Benchmark {
     param($Candidates, $Runs = 3)
     Write-Host "`n=== Phase 1: Benchmark ===" -ForegroundColor Cyan
 
@@ -271,17 +349,99 @@ function Invoke-Gate {
     }
     $memoryNote | ConvertTo-Json -Depth 5 | Out-File "$CycleDir\latest.json" -Force
 
-    Log "Compounded to $CycleDir"
     # Sync research artifacts to Obsidian vault
     try{& "$ScriptsDir\sync-obsidian.ps1" -Force >$null 2>$null;Log "OBSIDIAN: Research artifacts synced to vault"}catch{Log "OBSIDIAN SKIP: sync-obsidian.ps1 failed: $_"}
+
+    # Learnings.md - per-cycle structured accumulation (auto-harness pattern)
+    $learningsFile = "$CycleDir\learnings.md"
+    $prevLearnings = ""
+    $prevLearnPath = "$env:USERPROFILE\.autoresearch\learnings.md"
+    if (Test-Path $prevLearnPath) { $prevLearnings = Get-Content $prevLearnPath -Raw }
+    $cycleLearnings = @(
+        "## Cycle $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+        "- Candidates: $($Candidates.Count) | Benchmark passed: $BenchmarkPassed | Gates: $gatesPassed"
+        "- Score: $benchScore"
+        "- Best score: $($manifest.best_score)"
+    )
+    if ($Candidates.Count -gt 0) {
+        $topC = $Candidates[0]
+        $cycleLearnings += "- Top candidate: $($topC.Name) (score $($topC.Score)/100)"
+    }
+    $cycleLearnings += @("","")
+    $allLearnings = $prevLearnings + ($cycleLearnings -join "`r`n")
+    $allLearnings | Out-File $prevLearnPath -Encoding utf8
+    $cycleLearnings -join "`r`n" | Out-File $learningsFile -Encoding utf8
+    Log "Learnings appended to $prevLearnPath"
+
+    # Regression suite - self-maintained eval suite (auto-harness gating.py pattern)
+    $regressionFile = "$env:USERPROFILE\.autoresearch\regression-suite.json"
+    $latestBench = @(Get-ChildItem "$benchmarksDir\*.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+    if ($latestBench) {
+        try {
+            $benchResult = Get-Content $latestBench[0].FullName -Raw | ConvertFrom-Json
+            $suite = @{}
+            if (Test-Path $regressionFile) { $suite = Get-Content $regressionFile -Raw | ConvertFrom-Json }
+            $suite.last_run = (Get-Date -Format "yyyy-MM-dd HH:mm")
+            $suite.score = $benchScore
+            $suite.best_score = $manifest.best_score
+
+            # Parse per-task data from individual run files
+            $allTasks = @{}
+            $suiteTasks = @{}
+            if ($suite.tasks -and $suite.tasks.PSObject.Properties) {
+                foreach ($__prop in $suite.tasks.PSObject.Properties) { $suiteTasks[$__prop.Name] = $__prop.Value }
+            }
+            if ($benchResult.run_files) {
+                foreach ($rf in $benchResult.run_files) {
+                    if (Test-Path $rf) {
+                        $runData = Get-Content $rf -Raw | ConvertFrom-Json
+                        $suite.total_tests = $runData.total_tests
+                        $suite.passed_tests = $runData.passed_tests
+                        $suite.failed_tests = $runData.failed_tests
+                        if ($runData.tests) {
+                            foreach ($t in $runData.tests.PSObject.Properties) {
+                                $taskName = $t.Name
+                                $taskPass = $t.Value.pass
+                                if (-not $allTasks.ContainsKey($taskName)) { $allTasks[$taskName] = $taskPass }
+                                $__inSuite = $suiteTasks.ContainsKey($taskName)
+                                # Auto-promote: if passing and not in suite, add it
+                                if ($taskPass -and -not $__inSuite) {
+                                    $suiteTasks[$taskName] = @{ added = (Get-Date -Format "yyyy-MM-dd HH:mm"); status = "passing" }
+                                }
+                                # Flag regression: was in suite but now failing
+                                if (-not $taskPass -and $__inSuite) {
+                                    $suiteTasks[$taskName].status = "regressed"
+                                    $suiteTasks[$taskName].last_fail = (Get-Date -Format "yyyy-MM-dd HH:mm")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            # Use Add-Member for JSON objects (can't set new properties directly)
+            $suite | Add-Member -NotePropertyName "tasks" -NotePropertyValue $suiteTasks -Force
+
+            # Track trend direction
+            if ($suite.history -isnot [array]) { $suite.history = @() }
+            $prevScore = if ($suite.history.Count -gt 0) { $suite.history[-1].score } else { $null }
+            $trend = if ($null -eq $prevScore) { "initial" } elseif ($benchScore -gt $prevScore) { "up" } elseif ($benchScore -lt $prevScore) { "down" } else { "flat" }
+            $suite | Add-Member -NotePropertyName "trend" -NotePropertyValue $trend -Force
+            $suite.history += @{ date = (Get-Date -Format "yyyy-MM-dd HH:mm"); score = $benchScore; trend = $trend; tasks = $suite.passed_tests; total = $suite.total_tests }
+            if ($suite.history.Count -gt 20) { $suite.history = $suite.history | Select-Object -Last 20 }
+
+            $suite | ConvertTo-Json -Depth 5 -Compress | Set-Content $regressionFile
+            $regressedCount = @($suiteTasks.Values | Where-Object { $_.status -eq "regressed" }).Count
+            $promotedCount = @($suiteTasks.Values | Where-Object { $_.added -eq (Get-Date -Format "yyyy-MM-dd HH:mm") }).Count
+            Log "Regression suite: $($suite.passed_tests)/$($suite.total_tests) passing ($trend), $regressedCount regressed, $promotedCount promoted"
+        } catch { Log "WARNING: Could not update regression suite: $_" }
+    }
+    Write-Host "Learnings stored. $($allCycles.Count) total cycles recorded." -ForegroundColor Cyan
     Write-Host "Learnings stored. $($allCycles.Count) total cycles recorded." -ForegroundColor Cyan
 }
 
 # ═══════════════════════════════════════════════════════════════
 # MAIN PIPELINE
 # ═══════════════════════════════════════════════════════════════
-. "C:\\Users\\Administrator\\Scripts\\archive\\ahe-evolve-module.ps1"\n\n. "C:\\Users\\Administrator\\Scripts\\archive\\ahe-evolve-module.ps1"
-
 Write-Host "=== Self-Improvement Pipeline ===" -ForegroundColor Magenta
 Write-Host "Date: $CycleDate" -ForegroundColor Gray
 Write-Host ""
@@ -418,11 +578,76 @@ if ((-not $Phase) -or $Phase -eq "discover") {
         Add-AheIteration -Manifest $manifest -Candidate $c.Name -Prediction $pred -Verification $ver
         Log "AHE: $($c.Name) — $expectedFix"
     }
+
+    # Generate PROGRAM.md for top-scored candidate (auto-harness pattern)
+    if ($allCandidates.Count -gt 0) {
+        $topCandidate = $allCandidates | Sort-Object Score -Descending | Select-Object -First 1
+        $programFile = "$CycleDir\PROGRAM.md"
+        $bestScore = $null
+        if ($manifest.best_score) { $bestScore = $manifest.best_score }
+
+        @"
+# PROGRAM.md — AHE Auto-Implementation Plan
+## Cycle: $(Get-Date -Format "yyyy-MM-dd HH:mm")
+
+### Top Candidate: $($topCandidate.Name)
+- **Score:** $($topCandidate.Score)/100 ($($topCandidate.Stars)★)
+- **Category:** $($topCandidate.Category)
+- **Description:** $($topCandidate.Description)
+
+### Instructions
+1. Review the candidate at https://github.com/$($topCandidate.Name)
+2. Determine if this MCP/server should be installed
+3. If yes: install it, update settings.json, and run the benchmark
+4. If no: log rationale and skip
+
+### Gating
+- Run $ScriptsDir\benchmark.ps1 before and after
+- Current best score: $($bestScore)
+- Gate: score must improve or remain flat with no regressions
+
+### Regression Suite
+Check $env:USERPROFILE\.autoresearch\regression-suite.json for previously-passing tasks
+"@ | Out-File $programFile -Encoding utf8
+        Log "PROGRAM.md written for $($topCandidate.Name) — $programFile"
+
+    # Auto-implement top candidate (Phase 2 Lean)
+    if ($topCandidate.Score -ge 70) {
+        $evalResult = Invoke-CandidateEval -Candidate $topCandidate -Manifest $manifest
+        if ($evalResult) {
+            Log "CAND_EVAL: $($evalResult.candidate) → $($evalResult.verdict) (score: $($evalResult.score))"
+        }
+    }
+    }
 }
 
 if ((-not $Phase) -or $Phase -eq "benchmark") {
     $benchmarkPassed = Invoke-Benchmark -Candidates $allCandidates
     Log "AHE: Benchmark result: $benchmarkPassed"
+
+    # Best-So-Far Gate (Paper Algorithm 1, line 14)
+    $bestScoreFile = "$CycleDir\baseline.json"
+    if (Test-Path $bestScoreFile) {
+        $currentBest = Get-Content $bestScoreFile -Raw | ConvertFrom-Json
+        $currentScore = if ($null -ne $currentBest.median_score) { $currentBest.median_score } else { $currentBest.score }
+        $prevBest = $manifest.best_score
+        if ($null -eq $prevBest -or $currentScore -gt $prevBest) {
+            # JSON objects from ConvertFrom-Json can't set new properties directly
+            if ($null -eq $manifest.best_score -and $null -eq $prevBest) {
+                $manifest | Add-Member -NotePropertyName "best_score" -NotePropertyValue $currentScore -Force
+            } else {
+                $manifest.best_score = $currentScore
+            }
+            if ($null -ne $prevBest) {
+                Log "Best-So-Far Gate: NEW BEST $currentScore (was $prevBest, +$([math]::Round($currentScore - $prevBest, 1)) pts)"
+            } else {
+                Log "Best-So-Far Gate: Initial baseline $currentScore"
+            }
+            Save-AheManifest $manifest
+        } else {
+            Log "Best-So-Far Gate: $currentScore <= $prevBest (no improvement)"
+        }
+    }
 }
 
 if ((-not $Phase) -or $Phase -eq "gate") {
@@ -451,4 +676,5 @@ if ((-not $Phase) -or $Phase -eq "compound") {
 Write-Host ""
 Write-Host "=== Self-Improvement Complete ===" -ForegroundColor Magenta
 Log "Cycle complete. Log: $LogFile"
+
 

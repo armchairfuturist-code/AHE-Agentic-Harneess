@@ -1,16 +1,16 @@
-﻿# Qwen Code Plugin & Extension Update Manager
+# Qwen Code Plugin and Extension Update Manager
 # Intelligent script to detect, check, and update Qwen Code, GSD, CE plugins, and related projects
 #
 # Usage:
 #   .\update-plugins.ps1              - Check and update everything
 #   .\update-plugins.ps1 -CheckOnly   - Just report what would update
 #   .\update-plugins.ps1 -Force       - Force update even if up to date
-#   .\update-plugins.ps1 -Item qwen   - Only update a specific item (qwen, gsd, ce, rooted-leader)
+#   .\update-plugins.ps1 -Item qwen   - Only update a specific item (qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser)
 
 param(
     [switch]$CheckOnly,
     [switch]$Force,
-    [string]$Item,           # "qwen", "gsd", "ce", "rooted-leader", or "" for all
+    [string]$Item,           # "qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", or "" for all
     [switch]$ListItems,
     [switch]$Help
 )
@@ -132,6 +132,10 @@ function Show-Help {
     Write-Host "  gsd             Get-Shit-Done workflow plugin (npm package)"
     Write-Host "  ce              Compound Engineering extension (GitHub release)"
     Write-Host "  rooted-leader   Rooted Leader Site (Firebase project)"
+    Write-Host "  rtk             RTK Token Saver CLI (GitHub release)"
+    Write-Host "  context-mode    Context-Mode MCP server (npm package)"
+    Write-Host "  autocontext     AutoContext Python package (pip / GitHub)"
+    Write-Host "  agent-browser   Agent Browser CLI (npm package)"
 }
 
 function Show-ItemList {
@@ -142,6 +146,10 @@ function Show-ItemList {
     $qwenVer = "unknown"
     $gsdVer  = "unknown"
     $ceVer   = "unknown"
+    $rtkVer  = "unknown"
+    $cmVer   = "unknown"
+    $acVer   = "unknown"
+    $abVer   = "unknown"
 
     try {
         $v = npm list -g @qwen-code/qwen-code --depth=0 2>$null
@@ -158,6 +166,28 @@ function Show-ItemList {
         try { $ceVer = (Get-Content $pluginJson -Raw | ConvertFrom-Json).version } catch {}
     }
 
+    try {
+        $rv = rtk --version 2>$null
+        if ($rv -match 'rtk (\d+\.\d+\.\d+)') { $rtkVer = $Matches[1] }
+    } catch {}
+
+    try {
+        $cv = npm list -g context-mode --depth=0 2>$null
+        $cvt = $cv | Out-String
+        if ($cvt -match 'context-mode@(\d+\.\d+\.\d+)') { $cmVer = $Matches[1] }
+    } catch {}
+
+    try {
+        $av = pip show autocontext 2>$null | Out-String
+        if ($av -match '^Version: (\S+)') { $acVer = $Matches[1] }
+    } catch {}
+
+    try {
+        $abv = npm list -g agent-browser --depth=0 2>$null
+        $abvt = $abv | Out-String
+        if ($abvt -match 'agent-browser@(\S+)') { $abVer = $Matches[1] }
+    } catch {}
+
     Write-Host ""
     Write-Color "  qwen            Qwen Code CLI" -Color $Colors.Info
     Write-Host "    Version: $qwenVer (installed)"
@@ -167,7 +197,7 @@ function Show-ItemList {
     Write-Color "  gsd             Get-Shit-Done workflow plugin" -Color $Colors.Info
     Write-Host "    Version: $gsdVer (installed)"
     Write-Host "    Source:  npm package get-shit-done-cc"
-    Write-Host "    Update:  npx -y get-shit-done-cc@latest --claude --global"
+    Write-Host "    Update:  npx -y get-shit-done-cc@latest --qwen --global"
     Write-Host ""
     Write-Color "  ce              Compound Engineering extension" -Color $Colors.Info
     Write-Host "    Version: $ceVer (installed)"
@@ -178,6 +208,25 @@ function Show-ItemList {
     Write-Host "    Location: $RootedLeaderDir"
     Write-Host "    Checks:   git status, npm outdated, Firebase deploy"
     Write-Host ""
+    Write-Color "  rtk             RTK Token Saver" -Color $Colors.Info
+    Write-Host "    Version: $rtkVer (installed)"
+    Write-Host "    Source:  GitHub rtk-ai/rtk"
+    Write-Host "    Update:  .\update-plugins.ps1 (auto)"
+    Write-Host ""
+    Write-Color "  context-mode    Context-Mode MCP server" -Color $Colors.Info
+    Write-Host "    Version: $cmVer (installed)"
+    Write-Host "    Source:  npm package context-mode"
+    Write-Host "    Update:  npm install -g context-mode@latest"
+    Write-Host ""
+    Write-Color "  autocontext     AutoContext Python package" -Color $Colors.Info
+    Write-Host "    Version: $acVer (installed)"
+    Write-Host "    Source:  pip / greyhaven-ai/autocontext"
+    Write-Host "    Update:  pip install -U autocontext"
+    Write-Host ""
+    Write-Color "  agent-browser   Agent Browser CLI" -Color $Colors.Info
+    Write-Host "    Version: $abVer (installed)"
+    Write-Host "    Source:  npm package agent-browser"
+    Write-Host "    Update:  npm install -g agent-browser@latest"
 }
 
 if ($Help) {
@@ -216,7 +265,7 @@ function Get-QwenLatestVersion {
 function Update-Qwen {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[1/4] Qwen Code CLI"
+    Write-Step "[1/8] Qwen Code CLI"
 
     $currentVer = Get-QwenCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -314,7 +363,7 @@ function Sync-GSD {
 function Update-GSD {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[2/4] Get-Shit-Done (GSD)"
+    Write-Step "[2/8] Get-Shit-Done (GSD)"
 
     $currentVer = Get-GSDCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -405,7 +454,7 @@ function Get-CELatestVersion {
 function Update-CE {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[3/4] Compound Engineering (CE)"
+    Write-Step "[3/8] Compound Engineering (CE)"
 
     $currentVer = Get-CECurrentVersion
     Write-Host "  Current:  $currentVer (extension)"
@@ -556,7 +605,7 @@ function Update-CE {
 function Check-RootedLeader {
     param([bool]$CheckOnly)
 
-    Write-Step "[4/4] Rooted Leader Site"
+    Write-Step "[4/8] Rooted Leader Site"
 
     if (-not (Test-Path $RootedLeaderDir)) {
         Write-Skip "Project directory not found at $RootedLeaderDir"
@@ -672,6 +721,383 @@ function Check-RootedLeader {
 }
 
 # =============================================================================
+#  RTK (RUST TOKEN KILLER) UPDATE
+# =============================================================================
+
+function Get-RTKCurrentVersion {
+    try {
+        $v = rtk --version 2>$null
+        if ($v -match 'rtk (\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-RTKLatestVersion {
+    try {
+        $url = "https://api.github.com/repos/rtk-ai/rtk/releases/latest"
+        $response = Invoke-RestMethod -Uri $url -Headers @{ "Accept" = "application/vnd.github.v3+json" } -UseBasicParsing -ErrorAction Stop
+        $tag = $response.tag_name
+        if ($tag -match 'v?(\d+\.\d+\.\d+)') { return $Matches[1] }
+        return ($tag -replace '^v', '')
+    } catch { return $null }
+}
+
+function Update-RTK {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[5/8] RTK Token Saver"
+
+    $currentVer = Get-RTKCurrentVersion
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   GitHub rtk-ai/rtk"
+
+    $latestVer = Get-RTKLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest RTK release from GitHub" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "RTK $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Downloading RTK v$latestVer from GitHub releases..."
+            $rtkDir = "$env:LOCALAPPDATA\rtk"
+            $null = New-Item -ItemType Directory -Path $rtkDir -Force -ErrorAction SilentlyContinue
+
+            # Download latest binary for Windows
+            $url = "https://github.com/rtk-ai/rtk/releases/download/v$latestVer/rtk-x86_64-pc-windows-msvc.zip"
+            $zipPath = Join-Path $env:TEMP "rtk-$latestVer.zip"
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+            } catch {
+                # Try without v prefix
+                $url2 = "https://github.com/rtk-ai/rtk/releases/download/$latestVer/rtk-x86_64-pc-windows-msvc.zip"
+                Invoke-WebRequest -Uri $url2 -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+            }
+
+            # Extract and replace
+            $extractDir = Join-Path $env:TEMP "rtk-extract-$Global:sessionId"
+            $null = New-Item -ItemType Directory -Path $extractDir -Force -ErrorAction SilentlyContinue
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+            $rtkExe = Get-ChildItem $extractDir -Recurse -Filter "rtk.exe" | Select-Object -First 1
+            if ($rtkExe) {
+                $localBin = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+                if (Test-Path "C:\Users\Administrator\.local\bin") {
+                    $localBin = "C:\Users\Administrator\.local\bin"
+                }
+                Copy-Item -Path $rtkExe.FullName -Destination "$localBin\rtk.exe" -Force
+                Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+                $newVer = Get-RTKCurrentVersion
+                Write-Result "Updated to $newVer" $true
+                Write-Log "RTK updated: $currentVer -> $newVer (downloaded from GitHub)"
+            } else {
+                Write-Result "Could not find rtk.exe in downloaded archive" $false
+                Write-Log "RTK update FAILED: binary not found in release" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during RTK update: $_" $false
+            Write-Log "RTK update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
+#  CONTEXT-MODE MCP UPDATE
+# =============================================================================
+
+function Get-ContextModeCurrentVersion {
+    # Check local package.json first (more reliable than npm list -g)
+    $localPkg = "C:\Python314\Lib\site-packages\nodejs_wheel\node_modules\context-mode\package.json"
+    if (Test-Path $localPkg) {
+        try {
+            $pkg = Get-Content $localPkg -Raw | ConvertFrom-Json
+            if ($pkg.version) { return $pkg.version }
+        } catch {}
+    }
+    try {
+        $v = npm list -g context-mode --depth=0 2>$null
+        $vt = $v | Out-String
+        if ($vt -match 'context-mode@(\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-ContextModeLatestVersion {
+    try {
+        $ver = npm view context-mode version 2>$null
+        if ($ver) { return $ver.Trim() }
+    } catch {}
+    return $null
+}
+
+function Update-ContextMode {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[6/8] Context-Mode MCP"
+
+    $currentVer = Get-ContextModeCurrentVersion
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   npm package context-mode"
+
+    $latestVer = Get-ContextModeLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest context-mode version from npm" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or $currentVer -eq "unknown" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "Context-Mode $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            # EBUSY workaround: install to temp prefix and copy key files
+            Write-Host "  Installing context-mode v$latestVer (working around EBUSY)..."
+            $tempPrefix = Join-Path $env:TEMP "cm-install-$Global:sessionId"
+            $null = New-Item -ItemType Directory -Path $tempPrefix -Force -ErrorAction SilentlyContinue
+
+            $output = npm install -g context-mode@latest --prefix $tempPrefix --no-optional 2>&1
+            $exit = $LASTEXITCODE
+            if ($exit -eq 0) {
+                # Copy key files from temp install to real location
+                $cmDir = "C:\Python314\Lib\site-packages\nodejs_wheel\node_modules\context-mode"
+                $tempCmDir = Join-Path $tempPrefix "node_modules\context-mode"
+                if (Test-Path $tempCmDir) {
+                    # Backup/replace start.mjs and key JS bundles (skip locked .node files)
+                    $keyFiles = @("start.mjs", "cli.bundle.mjs", "server.bundle.mjs", "package.json")
+                    foreach ($f in $keyFiles) {
+                        $src = Join-Path $tempCmDir $f
+                        $dst = Join-Path $cmDir $f
+                        if (Test-Path $src) {
+                            Copy-Item -Path $src -Destination $dst -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    # Also copy hooks and configs
+                    foreach ($sub in @("hooks", "configs", "skills")) {
+                        $srcDir = Join-Path $tempCmDir $sub
+                        $dstDir = Join-Path $cmDir $sub
+                        if (Test-Path $srcDir) {
+                            Copy-Item -Path "$srcDir\*" -Destination $dstDir -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+
+                    $newVer = Get-ContextModeCurrentVersion
+                    Write-Result "Updated to $newVer (key files)" $true
+                    Write-Log "Context-Mode updated: $currentVer -> $newVer"
+                    Write-Color "  !! Restart Qwen Code to fully load updated MCP server" -Color $Colors.Warning
+                } else {
+                    Write-Result "Temp install succeeded but module not found at $tempCmDir" $false
+                }
+                # Cleanup temp
+                Remove-Item -Path $tempPrefix -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+                $errLines = ($output | Select-String -Pattern 'error') -join '; '
+                Write-Result "npm install failed (exit $exit): $errLines" $false
+                Write-Log "Context-Mode update FAILED: npm exit $exit" -Level "ERROR"
+                Remove-Item -Path $tempPrefix -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Write-Result "Exception during context-mode update: $_" $false
+            Write-Log "Context-Mode update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
+#  AUTOCONTEXT UPDATE
+# =============================================================================
+
+function Get-AutoContextCurrentVersion {
+    try {
+        $av = pip show autocontext 2>$null | Out-String
+        if ($av -match 'Version: (\S+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-AutoContextLatestVersion {
+    try {
+        $url = "https://pypi.org/pypi/autocontext/json"
+        $response = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
+        return $response.info.version
+    } catch { return $null }
+}
+
+function Update-AutoContext {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[7/8] AutoContext (Python)"
+
+    $currentVer = Get-AutoContextCurrentVersion
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   pip / greyhaven-ai/autocontext"
+
+    $latestVer = Get-AutoContextLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest autocontext version from PyPI" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "AutoContext $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Running: pip install -U autocontext"
+            $output = pip install -U autocontext 2>&1
+            $exit = $LASTEXITCODE
+            if ($exit -eq 0) {
+                $newVer = Get-AutoContextCurrentVersion
+                Write-Result "Updated to $newVer" $true
+                Write-Log "AutoContext updated: $currentVer -> $newVer"
+                Write-Color "  !! Restart Qwen Code to load updated Python module" -Color $Colors.Warning
+            } else {
+                Write-Result "pip install failed (exit $exit)" $false
+                Write-Log "AutoContext update FAILED: pip exit $exit" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during autocontext update: $_" $false
+            Write-Log "AutoContext update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
+#  AGENT-BROWSER UPDATE
+# =============================================================================
+
+function Get-AgentBrowserCurrentVersion {
+    try {
+        $v = npm list -g agent-browser --depth=0 2>$null
+        $vt = $v | Out-String
+        if ($vt -match 'agent-browser@(\S+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-AgentBrowserLatestVersion {
+    try {
+        $ver = npm view agent-browser version 2>$null
+        if ($ver) { return $ver.Trim() }
+    } catch {}
+    return $null
+}
+
+function Update-AgentBrowser {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[8/8] Agent Browser CLI"
+
+    $currentVer = Get-AgentBrowserCurrentVersion
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   npm package agent-browser"
+
+    $latestVer = Get-AgentBrowserLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest agent-browser version from npm" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "Agent-Browser $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Running: npm install -g agent-browser@latest"
+            $output = npm install -g agent-browser@latest 2>&1
+            $exit = $LASTEXITCODE
+            if ($exit -eq 0) {
+                $newVer = Get-AgentBrowserCurrentVersion
+                Write-Result "Updated to $newVer" $true
+                Write-Log "Agent-Browser updated: $currentVer -> $newVer"
+            } else {
+                Write-Result "npm install failed (exit $exit)" $false
+                Write-Log "Agent-Browser update FAILED: npm exit $exit" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during agent-browser update: $_" $false
+            Write-Log "Agent-Browser update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
 #  MAIN EXECUTION
 # =============================================================================
 
@@ -685,13 +1111,17 @@ try {
             "gsd"           { $itemsToProcess = @("gsd") }
             "ce"            { $itemsToProcess = @("ce") }
             "rooted-leader" { $itemsToProcess = @("rooted-leader") }
+            "rtk"           { $itemsToProcess = @("rtk") }
+            "context-mode"  { $itemsToProcess = @("context-mode") }
+            "autocontext"   { $itemsToProcess = @("autocontext") }
+            "agent-browser" { $itemsToProcess = @("agent-browser") }
             default {
-                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader" -Color $Colors.Error
+                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser" -Color $Colors.Error
                 exit 1
             }
         }
     } else {
-        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader")
+        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser")
     }
 
     $hasUpdates = $false
@@ -713,6 +1143,26 @@ try {
 
     if ($itemsToProcess -contains "rooted-leader") {
         Check-RootedLeader -CheckOnly $CheckOnly
+    }
+
+    if ($itemsToProcess -contains "rtk") {
+        Update-RTK -CheckOnly $CheckOnly -Force $Force
+        if (-not $CheckOnly -and (Get-RTKCurrentVersion) -ne (Get-RTKLatestVersion)) { $hasUpdates = $true }
+    }
+
+    if ($itemsToProcess -contains "context-mode") {
+        Update-ContextMode -CheckOnly $CheckOnly -Force $Force
+        if (-not $CheckOnly -and (Get-ContextModeCurrentVersion) -ne (Get-ContextModeLatestVersion)) { $hasUpdates = $true }
+    }
+
+    if ($itemsToProcess -contains "autocontext") {
+        Update-AutoContext -CheckOnly $CheckOnly -Force $Force
+        if (-not $CheckOnly -and (Get-AutoContextCurrentVersion) -ne (Get-AutoContextLatestVersion)) { $hasUpdates = $true }
+    }
+
+    if ($itemsToProcess -contains "agent-browser") {
+        Update-AgentBrowser -CheckOnly $CheckOnly -Force $Force
+        if (-not $CheckOnly -and (Get-AgentBrowserCurrentVersion) -ne (Get-AgentBrowserLatestVersion)) { $hasUpdates = $true }
     }
 
     # Summary

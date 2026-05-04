@@ -1,4 +1,4 @@
-﻿
+
 <#
 .SYNOPSIS
     System Benchmark — evalutes MCPs, hooks, system integrity for AHE pipeline
@@ -89,7 +89,7 @@ function Invoke-SystemTests {
     if($found -eq 0){Test-Fail "mcp.coverage" "None found";return}
     $working=0;foreach($name in $expected){$cfg=$settings.mcpServers.$name;if($cfg){$cmd=Get-Command $cfg.command -ErrorAction SilentlyContinue;if($cmd){$working++}}}
     Test-Pass "mcp.commands" "$working/$found commands on PATH"
-    $braveKey=[Environment]::GetEnvironmentVariable("BRAVE_API_KEY")
+    $braveKey=[Environment]::GetEnvironmentVariable("BRAVE_API_KEY")-or[Environment]::GetEnvironmentVariable("BRAVE_API_KEY","User")
     if($braveKey){Test-Pass "mcp.brave_key" "BRAVE_API_KEY set"}else{Test-Fail "mcp.brave_key" "BRAVE_API_KEY missing"}
     $ghToken=[Environment]::GetEnvironmentVariable("GITHUB_TOKEN")
     if($ghToken){Test-Pass "mcp.github_token" "GITHUB_TOKEN set"}else{Test-Fail "mcp.github_token" "GITHUB_TOKEN missing"}
@@ -284,3 +284,17 @@ if ($Json) {
 }
 
 return $medianScore
+
+function Invoke-HardTests {
+    Write-Host "  Hard Tests (weight x4):" -ForegroundColor Cyan
+    $disk = Get-PSDrive C -ErrorAction SilentlyContinue
+    if ($disk.Free -gt 10GB) { Test-Pass "hard.disk" "$([math]::Round($disk.Free/1GB,1)) GB free" }
+    else { Test-Fail "hard.disk" "Low disk space" }
+    $mem = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).TotalVisibleMemorySize
+    if ($mem -gt 4GB/1KB) { Test-Pass "hard.memory" "$([math]::Round($mem*1KB/1GB,1)) GB" }
+    else { Test-Fail "hard.memory" "Low memory" }
+    $envVars = [Environment]::GetEnvironmentVariables()
+    $credCount = @($envVars.Keys | Where-Object { $_ -like "*API_KEY*" -or $_ -like "*TOKEN*" }).Count
+    if ($credCount -ge 2) { Test-Pass "hard.credentials" "$credCount API keys" }
+    else { Test-Fail "hard.credentials" "Only $credCount credentials" }
+}

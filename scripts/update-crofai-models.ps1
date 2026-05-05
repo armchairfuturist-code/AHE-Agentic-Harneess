@@ -104,6 +104,20 @@ function Build-ModelEntry {
     return $entry
 }
 
+
+function Test-ModelHealth {
+    param([string]$ModelId, [string]$Url, [string]$ApiKey)
+    try {
+        $body = @{ model = $ModelId; messages = @(@{ role = "user"; content = "ping" }); max_tokens = 5 } | ConvertTo-Json -Compress
+        $response = Invoke-RestMethod -Uri "$Url/chat/completions" -Method Post -Headers @{ Authorization = "Bearer $ApiKey"; "Content-Type" = "application/json" } -Body $body -ErrorAction Stop -TimeoutSec 15
+        return @{ healthy = $true; content = $response.choices[0].message.content }
+    } catch {
+        $sc = $_.Exception.Response.StatusCode.value__
+        Write-Color "  ⚠ $ModelId failed: HTTP $sc - skipping" -Color $Colors.Warning
+        return @{ healthy = $false; status = $sc }
+    }
+}
+
 function Fetch-Models {
     param([string]$Url)
     try {
@@ -149,6 +163,9 @@ $newModels = @()
 $newCount = 0
 foreach ($md in $allModelData) {
     foreach ($m in $md.Models) {
+        $ak = [Environment]::GetEnvironmentVariable("CROFAI_API_KEY","User");if(-$null -eq $ak){$ak=[Environment]::GetEnvironmentVariable("CROFAI_API_KEY","Machine")}
+        $health = Test-ModelHealth -ModelId $m.id -Url $md.Ep.Url -ApiKey $ak
+        if (-not $health.healthy) { continue }
         $entry = Build-ModelEntry -ApiModel $m -EndpointUrl $md.Ep.Url -Label $md.Ep.Label -Desc $md.Ep.Desc -Suffix $md.Ep.Suffix
         $newModels += $entry
         $newCount++

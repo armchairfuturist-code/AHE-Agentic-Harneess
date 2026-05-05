@@ -1,12 +1,12 @@
 # CrofAI Model Update Script
 # Updates Qwen Code settings.json with latest models from crof.ai endpoints
-# Production models always included; use -IncludeBeta for beta endpoint
+# Production models always included; use -INCLUDE_BETA for beta endpoint
 # Uses selective generationConfig (only non-default overrides) and compact JSON
 # NOTE: Preserves hooks, MCP servers, env, security, performance, permissions, ui, and context sections
 
 param(
     [switch]$CheckOnly,
-    [switch]$IncludeBeta,
+    [switch]$INCLUDE_BETA,
     [switch]$Force,
     [switch]$Help
 )
@@ -18,9 +18,7 @@ $SettingsPath = "C:\Users\Administrator\.qwen\settings.json"
 $Endpoints = @(
     @{ Name = "production"; Url = "https://crof.ai/v1"; Suffix = ""; Label = "CrofAI"; Desc = "Model via CrofAI" }
 )
-if ($IncludeBeta) {
-    $Endpoints += @{ Name = "beta"; Url = "https://beta.crof.ai/v1"; Suffix = "-beta"; Label = "CrofAI Beta"; Desc = "Model via CrofAI Beta Endpoint" }
-}
+$Endpoints += @{ Name = "beta"; Url = "https://beta.crof.ai/v1"; Label = "CrofAI Beta"; Desc = "Model via CrofAI Beta Endpoint" }
 
 $Colors = @{
     Success = "Green"; Warning = "Yellow"; Error = "Red"; Info = "Cyan"; Header = "Magenta"; Dim = "DarkGray"
@@ -37,13 +35,13 @@ function Show-Help {
     Write-Host ""
     Write-Color "Options:" -Color $Colors.Info
     Write-Host "  -CheckOnly    Check available models without updating"
-    Write-Host "  -IncludeBeta  Include beta endpoint models (beta.crof.ai)"
+    Write-Host "  "
     Write-Host "  -Force        Force update even if no new models"
     Write-Host "  -Help         Show this help message"
     Write-Host ""
     Write-Color "Endpoints:" -Color $Colors.Info
     Write-Host "  - production (https://crof.ai/v1) — always included (20 models)"
-    Write-Host "  - beta       (https://beta.crof.ai/v1) — with -IncludeBeta (20 models)"
+    Write-Host "  - beta       (https://beta.crof.ai/v1) — auto-included (20 models)"
     Write-Host ""
     Write-Color "Size targets:" -Color $Colors.Info
     Write-Host "  < 5 KB:  Perfect, instant init"
@@ -53,7 +51,7 @@ function Show-Help {
     Write-Color "Examples:" -Color $Colors.Info
     Write-Host "  .\update-crofai-models.ps1 -CheckOnly"
     Write-Host "  .\update-crofai-models.ps1"
-    Write-Host "  .\update-crofai-models.ps1 -IncludeBeta"
+    Write-Host "  .\update-crofai-models.ps1 -INCLUDE_BETA"
 }
 
 # --- Override profiles: only non-default values ---
@@ -141,8 +139,8 @@ Write-Host ""
 
 $endpointsToCheck = $Endpoints | ForEach-Object { "$($_.Name) ($($_.Url))" }
 Write-Color "Endpoints: $($endpointsToCheck -join ', ')" -Color $Colors.Info
-if (-not $IncludeBeta) {
-    Write-Color "  (use -IncludeBeta to add beta endpoint)" -Color $Colors.Dim
+if (-not $INCLUDE_BETA) {
+    Write-Color "  (beta auto-included, deduped against production)" -Color $Colors.Dim
 }
 Write-Host ""
 
@@ -166,6 +164,11 @@ foreach ($md in $allModelData) {
         $ak = [Environment]::GetEnvironmentVariable("CROFAI_API_KEY","User");if(-$null -eq $ak){$ak=[Environment]::GetEnvironmentVariable("CROFAI_API_KEY","Machine")}
         $health = Test-ModelHealth -ModelId $m.id -Url $md.Ep.Url -ApiKey $ak
         if (-not $health.healthy) { continue }
+        $existingIds = $newModels | ForEach-Object { $_.id }
+        if ($md.Ep.Name -eq "beta" -and $m.id -in $existingIds) {
+            Write-Color "  - Skipping $($m.id) (already from production)" -Color $Colors.Dim
+            continue
+        }
         $entry = Build-ModelEntry -ApiModel $m -EndpointUrl $md.Ep.Url -Label $md.Ep.Label -Desc $md.Ep.Desc -Suffix $md.Ep.Suffix
         $newModels += $entry
         $newCount++

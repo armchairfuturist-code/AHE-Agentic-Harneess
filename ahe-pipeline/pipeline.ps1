@@ -315,7 +315,7 @@ function Invoke-Gate {
     Write-Host "  AHE Pipeline: $pass/$($pass+$fail) checks passed" -ForegroundColor $(if($fail-eq0){"Green"}else{"Yellow"})
     return ($fail -eq 0)
 }
-Invoke-Compound {
+function Invoke-Compound {
     param($Candidates, $BenchmarkPassed, $GatesPassed)
     Write-Host "`n=== Phase 3: Compound ===" -ForegroundColor Cyan
 
@@ -870,7 +870,9 @@ if ((-not $Phase) -or $Phase -eq "verify") {
     $mcpsPassed = Invoke-McpVerification
     Log "AHE: MCP Verification result: $mcpsPassed"
 }
-    Invoke-Swarm -Goal "Optimize AHE harness with multi-model routing"
+
+# Compound: store learnings
+if ((-not $Phase) -or $Phase -eq "compound") {
     Invoke-Compound -Candidates $allCandidates -BenchmarkPassed $benchmarkPassed -GatesPassed $gatesPassed
 }
 

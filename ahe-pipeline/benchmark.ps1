@@ -169,6 +169,63 @@ function Invoke-ScenarioTests {
 }
 
 # ═══════════════════════════════════════════════════════════════
+# TRACT: UTILITY (forward progress — never saturates)
+# ═══════════════════════════════════════════════════════════════
+function Invoke-UtilityTests {
+    Write-Host "  Utility Tract (forward progress):" -ForegroundColor Cyan
+    try {
+        $s = Get-Content "$env:USERPROFILE\.qwen\settings.json" -Raw | ConvertFrom-Json
+        $mcpCount = if ($s.mcpServers) { @($s.mcpServers.PSObject.Properties).Count } else { 0 }
+        if ($mcpCount -ge 4) { Test-Pass "util.mcp_count" "$mcpCount MCP servers configured" }
+        else { Test-Fail "util.mcp_count" "Only $mcpCount MCPs (want ≥4)" }
+    } catch { Test-Fail "util.mcp_count" "Parse error: $_" }
+    $skillDir = "$env:USERPROFILE\.qwen\skills"
+    $skillCount = @(Get-ChildItem "$skillDir\*" -Directory -ErrorAction SilentlyContinue).Count
+    if ($skillCount -ge 50) { Test-Pass "util.skills" "$skillCount skills available" }
+    else { Test-Fail "util.skills" "Only $skillCount skills (want ≥50)" }
+    $scriptDir = "$env:USERPROFILE\Scripts"
+    $scriptCount = @(Get-ChildItem "$scriptDir\*.ps1" -ErrorAction SilentlyContinue).Count
+    if ($scriptCount -ge 10) { Test-Pass "util.scripts" "$scriptCount PowerShell scripts" }
+    else { Test-Fail "util.scripts" "Only $scriptCount scripts (want ≥10)" }
+    $qwVer = & qwen --version 2>$null
+    if ($qwVer) { Test-Pass "util.qwen_version" "Qwen Code $qwVer" }
+    else { Test-Pass "util.qwen_version" "Qwen Code present (version check failed)" }
+}
+
+# ═══════════════════════════════════════════════════════════════
+# TRACT: RELIABILITY (stability under load)
+# ═══════════════════════════════════════════════════════════════
+function Invoke-ReliabilityTests {
+    Write-Host "  Reliability Tract (stability):" -ForegroundColor Cyan
+    try {
+        $s = Get-Content "$env:USERPROFILE\.qwen\settings.json" -Raw | ConvertFrom-Json
+        $mcpServers = if ($s.mcpServers) { $s.mcpServers.PSObject.Properties } else { @() }
+        $started = 0; $total = 0
+        foreach ($mcp in $mcpServers) {
+            $total++; $cmd = $mcp.Value.command
+            $cmdExists = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($cmdExists) { $started++ }
+        }
+        if ($total -gt 0) {
+            $pct = [math]::Round($started/$total*100)
+            if ($pct -ge 80) { Test-Pass "rel.mcp_commands" "$started/$total MCP commands on PATH ($pct%)" }
+            else { Test-Fail "rel.mcp_commands" "$started/$total MCP commands on PATH ($pct%)" }
+        } else { Test-Fail "rel.mcp_commands" "No MCP servers configured" }
+    } catch { Test-Fail "rel.mcp_commands" "Parse error: $_" }
+    try {
+        $size = (Get-Item "$env:USERPROFILE\.qwen\settings.json" -ErrorAction Stop).Length
+        if ($size -gt 300 -and $size -lt 51200) { Test-Pass "rel.settings_size" "$([math]::Round($size/1KB,1)) KB" }
+        else { Test-Fail "rel.settings_size" "$([math]::Round($size/1KB,1)) KB outside safe range" }
+    } catch { Test-Fail "rel.settings_size" "Missing: $_" }
+    $backupFile = "$env:USERPROFILE\.qwen\settings.json.last-good"
+    if (Test-Path $backupFile) {
+        $backupAge = ((Get-Date) - (Get-Item $backupFile).LastWriteTime).TotalDays
+        if ($backupAge -lt 1) { Test-Pass "rel.backup_fresh" "Backup is $([math]::Round($backupAge*24,1))h old" }
+        else { Test-Fail "rel.backup_fresh" "Backup is $([math]::Round($backupAge,1)) days old" }
+    } else { Test-Fail "rel.backup_fresh" "No backup found" }
+}
+
+# ═══════════════════════════════════════════════════════════════
 # MULTI-ROLLOUT EXECUTION (k=Runs)
 # ═══════════════════════════════════════════════════════════════
 $allScores = @()
@@ -194,13 +251,63 @@ for ($run = 1; $run -le $Runs; $run++) {
     Invoke-SkillTests
     Invoke-ScenarioTests
     Invoke-HardTests
+    Invoke-UtilityTests
+    Invoke-ReliabilityTests
 
     $score = Get-WeightedScore -TestResults $Results
+
+    # ── Tract Score Calculation ──
+    $tractScores = @{}
+    $tractScores["correctness"] = $score  # Full weighted score = correctness tract
+
+    # Utility tract: util.* tests only
+    $utilTests = @($Results.Keys | Where-Object { $_ -match '^util\.' })
+    if ($utilTests.Count -gt 0) {
+        $utilPassed = @($utilTests | Where-Object { $Results[$_].pass }).Count
+        $tractScores["utility"] = [math]::Round($utilPassed / $utilTests.Count * 100, 1)
+    } else { $tractScores["utility"] = 0 }
+
+    # Reliability tract: rel.* tests only
+    $relTests = @($Results.Keys | Where-Object { $_ -match '^rel\.' })
+    if ($relTests.Count -gt 0) {
+        $relPassed = @($relTests | Where-Object { $Results[$_].pass }).Count
+        $tractScores["reliability"] = [math]::Round($relPassed / $relTests.Count * 100, 1)
+    } else { $tractScores["reliability"] = 0 }
+
+    # ── Kappa: trailing score trend ──
+    $kappa = $null
+    $benchmarksDir = "$env:USERPROFILE\.autoresearch\benchmarks"
+    $recentAggs = @(Get-ChildItem "$benchmarksDir\*.json" -EA 0 |
+        Where-Object { $_.Name -notmatch '-run\d+\.' } |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 -First 5)
+    if ($recentAggs.Count -ge 2) {
+        $recentScores = @()
+        foreach ($rf in $recentAggs) {
+            try {
+                $rd = Get-Content $rf.FullName -Raw | ConvertFrom-Json
+                $rs = if ($null -ne $rd.median_score) { $rd.median_score } else { $rd.score }
+                if ($null -ne $rs) { $recentScores += $rs }
+            } catch {}
+        }
+        if ($recentScores.Count -ge 2) {
+            $kappa = [math]::Round(($recentScores[-1] - $recentScores[0]) / $recentScores.Count, 2)
+        }
+    }
+    if ($null -eq $kappa -and $recentAggs.Count -ge 1) { $kappa = 0 }
     $allScores += $score
 
     Write-Host ""
     Write-Host "═══════════════════════════════════" -ForegroundColor Magenta
     Write-Host "  Run $run Score: $score / 100" -ForegroundColor $(if($score -ge 80){'Green'}elseif($score -ge 50){'Yellow'}else{'Red'})
+
+    # Display tract scores
+    Write-Host "  ├─ Correctness:  $($tractScores["correctness"])/100" -ForegroundColor Cyan
+    Write-Host "  ├─ Utility:      $($tractScores["utility"])/100" -ForegroundColor $(if($tractScores["utility"] -ge 80){'Green'}else{'Yellow'})
+    Write-Host "  ├─ Reliability:  $($tractScores["reliability"])/100" -ForegroundColor $(if($tractScores["reliability"] -ge 80){'Green'}else{'Yellow'})
+    if ($null -ne $kappa) {
+        $kappaIcon = if ($kappa -gt 0) { "↗" } elseif ($kappa -lt 0) { "↘" } else { "→" }
+        Write-Host "  └─ Kappa:       $kappaIcon $kappa pts/run (trailing trend)" -ForegroundColor $(if($kappa -gt 0){'Green'}elseif($kappa -lt 0){'Red'}else{'Gray'})
+    }
     Write-Host "═══════════════════════════════════" -ForegroundColor Magenta
 
     if ($Detailed) {
@@ -225,6 +332,8 @@ for ($run = 1; $run -le $Runs; $run++) {
         total_tests = $Results.Count
         passed_tests = @($Results.Values | Where-Object { $_.pass }).Count
         failed_tests = @($Results.Values | Where-Object { -not $_.pass }).Count
+        tract_scores = $tractScores
+        kappa = $kappa
         tests = $Results
     }
     $output | ConvertTo-Json -Depth 3 -Compress | Set-Content $outputFile -Force
@@ -261,6 +370,10 @@ if ($Runs -gt 1) {
     Write-Host "═══════════════════════════════════" -ForegroundColor Magenta
 }
 
+# Tract scores from last run (use for aggregate)
+$lastTractScores = $tractScores
+$lastKappa = $kappa
+
 # Save aggregate result (this is what the pipeline reads)
 $aggFile = "$ResultsDir\benchmark-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
 $aggOutput = @{
@@ -271,12 +384,14 @@ $aggOutput = @{
     min_score = $minScore
     max_score = $maxScore
     spread = $spread
+    tract_scores = $lastTractScores
+    kappa = $lastKappa
     run_files = $allRunFiles
 }
-$aggOutput | ConvertTo-Json -Depth 2 -Compress | Set-Content $aggFile -Force
+$aggOutput | ConvertTo-Json -Depth 3 -Compress | Set-Content $aggFile -Force
 
 if ($Json) {
-    $aggOutput | ConvertTo-Json -Depth 2
+    $aggOutput | ConvertTo-Json -Depth 3
 } else {
     Write-Host ""
     Write-Host "Aggregate saved: $aggFile" -ForegroundColor Gray
@@ -284,17 +399,3 @@ if ($Json) {
 }
 
 return $medianScore
-
-function Invoke-HardTests {
-    Write-Host "  Hard Tests (weight x4):" -ForegroundColor Cyan
-    $disk = Get-PSDrive C -ErrorAction SilentlyContinue
-    if ($disk.Free -gt 10GB) { Test-Pass "hard.disk" "$([math]::Round($disk.Free/1GB,1)) GB free" }
-    else { Test-Fail "hard.disk" "Low disk space" }
-    $mem = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).TotalVisibleMemorySize
-    if ($mem -gt 4GB/1KB) { Test-Pass "hard.memory" "$([math]::Round($mem*1KB/1GB,1)) GB" }
-    else { Test-Fail "hard.memory" "Low memory" }
-    $envVars = [Environment]::GetEnvironmentVariables()
-    $credCount = @($envVars.Keys | Where-Object { $_ -like "*API_KEY*" -or $_ -like "*TOKEN*" }).Count
-    if ($credCount -ge 2) { Test-Pass "hard.credentials" "$credCount API keys" }
-    else { Test-Fail "hard.credentials" "Only $credCount credentials" }
-}

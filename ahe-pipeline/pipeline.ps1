@@ -18,7 +18,8 @@
 param(
     [string]$Phase = "",
     [switch]$WhatIf,
-    [switch]$LogOnly
+    [switch]$LogOnly,
+    [switch]$Research
 )
 
 $ErrorActionPreference = 'Continue'
@@ -285,7 +286,21 @@ function Invoke-Benchmark {
         Write-Host "  Delta: $([math]::Round($delta,1)) points ($direction)" -ForegroundColor $(if($delta -gt 0){'Green'}elseif($delta -lt 0){'Red'}else{'Gray'})
     }
 
-    return ($score -ge 50)  # Pass threshold: 50/100
+    # Tract scores + kappa from multi-tract benchmark
+    $tractScores = @{}
+    $kappa = $null
+    if ($result.tract_scores) { $tractScores = $result.tract_scores }
+    if ($null -ne $result.kappa) { $kappa = $result.kappa }
+
+    Log "  Correctness: $($tractScores.correctness)/100 | Utility: $($tractScores.utility)/100 | Reliability: $($tractScores.reliability)/100 | Kappa: $kappa"
+
+    # Return an object with tract-level detail for the pipeline decision matrix
+    return @{
+        passed = ($score -ge 50)
+        score = $score
+        tract_scores = $tractScores
+        kappa = $kappa
+    }
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -320,6 +335,8 @@ Invoke-Compound {
         candidatesFound = $Candidates.Count
         benchmarkPassed = $BenchmarkPassed
         benchmarkScore = $benchScore
+        tract_scores = $tractScores
+        kappa = $kappa
         gatesPassed = $GatesPassed
         baseline = $null
     }
@@ -441,6 +458,157 @@ Invoke-Compound {
 }
 
 # ═══════════════════════════════════════════════════════════════
+# PHASE: RESEARCH DISCOVERY (arxiv monitor)
+# ═══════════════════════════════════════════════════════════════
+function Invoke-ResearchDiscovery {
+    <#
+    .SYNOPSIS
+        Research phase: queries arxiv for new papers on agent evaluation, benchmarks, and self-improving systems.
+        Feeds findings into the AHE manifest as pending improvements.
+    .PARAMETER Force
+        Force a full scan regardless of 24h guard.
+    .PARAMETER Json
+        Output findings as JSON (for pipeline consumption).
+    #>
+    param([switch]$Force, [switch]$Json)
+
+    $ResearchDir = "$env:USERPROFILE\.autoresearch\research"
+    $StateFile = "$ResearchDir\state.json"
+    $FindingsFile = "$ResearchDir\findings.json"
+    $SeenFile = "$ResearchDir\seen_ids.json"
+
+    # Ensure directories
+    if (-not (Test-Path $ResearchDir)) { New-Item -ItemType Directory -Path $ResearchDir -Force | Out-Null }
+
+    # 24h guard: skip if run within 24 hours unless forced
+    if (-not $Force -and (Test-Path $StateFile)) {
+        try {
+            $state = Get-Content $StateFile -Raw | ConvertFrom-Json
+            if ($state.last_run) {
+                $lastRun = [DateTime]$state.last_run
+                if ((Get-Date) -lt $lastRun.AddHours(24)) {
+                    $remaining = [math]::Round(($lastRun.AddHours(24) - (Get-Date)).TotalHours, 1)
+                    Log "Research: skipped (next scan in $remaining hours, use -Research to force)"
+                    if ($Json) { return @() }
+                    return
+                }
+            }
+        } catch {}
+    }
+
+    Write-Host "`n=== Phase: Research Discovery (arxiv) ===" -ForegroundColor Cyan
+    Log "Querying arxiv for recent papers..."
+
+    # 8 queries covering evaluation, self-improvement, benchmarks, tool-use, workflows
+    $queries = @(
+        @{label="agent-eval"; q="cat:cs.AI+AND+all:agent+evaluation+benchmark"},
+        @{label="self-improve"; q="cat:cs.LG+AND+all:self+improving+self+rewarding"},
+        @{label="benchmark-method"; q="cat:cs.LG+AND+all:benchmark+evaluation+methodology"},
+        @{label="tool-use"; q="cat:cs.AI+AND+all:tool+use+function+calling+agent"},
+        @{label="harness-arch"; q="cat:cs.AI+AND+all:agent+workflow+orchestration+harness"},
+        @{label="code-eval"; q="cat:cs.SE+AND+all:code+generation+evaluation+execution"},
+        @{label="test-time"; q="cat:cs.LG+AND+all:test+time+compute+scaling+inference"},
+        @{label="multi-agent"; q="cat:cs.MA+AND+all:multi+agent+system+evaluation"}
+    )
+
+    # Load seen IDs
+    $seen = @{}
+    if (Test-Path $SeenFile) {
+        try { $seenList = Get-Content $SeenFile -Raw | ConvertFrom-Json; foreach ($id in $seenList) { $seen[$id] = $true } } catch {}
+    }
+
+    $allEntries = @()
+
+    foreach ($q in $queries) {
+        $url = "http://export.arxiv.org/api/query?search_query=$($q.q)&start=0&max_results=20&sortBy=submittedDate&sortOrder=descending"
+        try {
+            $xml = Invoke-RestMethod -Uri $url -TimeoutSec 10 -ErrorAction Stop
+            # Parse Atom feed entries
+            if ($xml.feed.entry) {
+                foreach ($entry in $xml.feed.entry) {
+                    $id = ($entry.id -replace 'http://arxiv.org/abs/', '' -replace 'http://arxiv.org/abs/', '').Trim()
+                    if (-not $id -or $seen.ContainsKey($id)) { continue }
+                    $title = if ($entry.title) { "$($entry.title)".Trim() } else { "Untitled" }
+                    $summary = if ($entry.summary) { "$($entry.summary)".Trim() } else { "" }
+                    $published = if ($entry.published) { "$($entry.published)".Trim().Substring(0,10) } else { "" }
+                    $authorNames = @()
+                    if ($entry.author) {
+                        $authors = if ($entry.author -is [array]) { $entry.author } else { @($entry.author) }
+                        $authorNames = $authors | ForEach-Object { "$($_.name)".Trim() }
+                    }
+                    $cat = ""
+                    if ($entry.'arxiv:primary_category') { $cat = "$($entry.'arxiv:primary_category'.term)" }
+                    $pdfLink = ""
+                    if ($entry.link) {
+                        $links = if ($entry.link -is [array]) { $entry.link } else { @($entry.link) }
+                        $pdfLink = ($links | Where-Object { $_.title -eq 'pdf' } | Select-Object -First 1).href
+                    }
+                    if (-not $pdfLink) { $pdfLink = "https://arxiv.org/abs/$id" }
+
+                    # Heuristic relevance scoring (title + abstract keywords)
+                    $relevanceScore = 5  # base
+                    $lowerTitle = $title.ToLower()
+                    $lowerSummary = $summary.ToLower()
+                    $allText = $lowerTitle + " " + $lowerSummary
+                    if ($allText -match 'benchmark|evaluation|metric') { $relevanceScore += 2 }
+                    if ($allText -match 'self.improv|self.evolv|autonomous|recursive') { $relevanceScore += 2 }
+                    if ($allText -match 'agent|harness|pipeline|workflow|orchestrat') { $relevanceScore += 1 }
+                    if ($allText -match 'saturat|ceiling|plateau|diminish|decay') { $relevanceScore += 2 }
+                    if ($allText -match 'tool.use|function.call|mcp|api') { $relevanceScore += 1 }
+
+                    $allEntries += [PSCustomObject]@{
+                        arxiv_id = $id
+                        title = $title
+                        published = $published
+                        authors = $authorNames -join '; '
+                        category = $cat
+                        url = "https://arxiv.org/abs/$id"
+                        pdf_url = $pdfLink
+                        relevance_score = [math]::Min($relevanceScore, 10)
+                        summary_1line = if ($summary.Length -gt 150) { $summary.Substring(0,150) + "..." } else { $summary }
+                    }
+                }
+            }
+        } catch {
+            Log "  arxiv query '$($q.label)' failed: $_"
+        }
+        # Rate limit: 1 request per 3 seconds
+        Start-Sleep -Seconds 3
+    }
+
+    # Sort by relevance, take top 5
+    $topFindings = $allEntries | Sort-Object relevance_score -Descending | Select-Object -First 5
+
+    if ($topFindings.Count -gt 0) {
+        Log "Research: $($allEntries.Count) new papers found, top $($topFindings.Count) by relevance"
+        foreach ($f in $topFindings) {
+            Log "  [$($f.relevance_score)/10] $($f.title) ($($f.published))"
+        }
+    } else {
+        Log "Research: No new relevant papers found"
+    }
+
+    # Persist findings
+    $findingsOutput = @{
+        timestamp = Get-Date -Format "yyyy-MM-dd HH:mm"
+        total_new = $allEntries.Count
+        top_findings = $topFindings
+    }
+    $findingsOutput | ConvertTo-Json -Depth 3 -Compress | Set-Content $FindingsFile -Force
+
+    # Update seen IDs
+    $allIds = @($seen.Keys) + ($allEntries | ForEach-Object { $_.arxiv_id })
+    $allIds | ConvertTo-Json -Compress | Set-Content $SeenFile -Force
+
+    # Update state
+    @{ last_run = Get-Date -Format "yyyy-MM-dd HH:mm:ss"; last_count = $topFindings.Count } | ConvertTo-Json -Compress | Set-Content $StateFile -Force
+
+    Log "Research findings saved to $FindingsFile"
+
+    if ($Json) { return $topFindings }
+}
+
+# ═══════════════════════════════════════════════════════════════
 # MAIN PIPELINE
 # ═══════════════════════════════════════════════════════════════
 Write-Host "=== Self-Improvement Pipeline ===" -ForegroundColor Magenta
@@ -539,6 +707,11 @@ if ((-not $Phase) -or $Phase -eq "evolve") {
     Log "AHE: Evolve result: $evolveOk"
 }
 
+# Research Discovery (arxiv): runs before benchmark, can be standalone with -Phase research or -Research
+if ((-not $Phase) -or $Phase -eq "research" -or $Research) {
+    Invoke-ResearchDiscovery
+}
+
 if ((-not $Phase) -or $Phase -eq "discover") {
     $allCandidates = Invoke-Discovery
 
@@ -623,8 +796,36 @@ Check $env:USERPROFILE\.autoresearch\regression-suite.json for previously-passin
 }
 
 if ((-not $Phase) -or $Phase -eq "benchmark") {
-    $benchmarkPassed = Invoke-Benchmark -Candidates $allCandidates
-    Log "AHE: Benchmark result: $benchmarkPassed"
+    $benchResult = Invoke-Benchmark -Candidates $allCandidates
+    $benchmarkPassed = $benchResult.passed
+    $tractScores = $benchResult.tract_scores
+    $kappa = $benchResult.kappa
+    Log "AHE: Benchmark result: passed=$benchmarkPassed score=$($benchResult.score) utility=$($tractScores.utility) reliability=$($tractScores.reliability) kappa=$kappa"
+    Write-Host "  Tract scores — Correctness: $($tractScores.correctness) | Utility: $($tractScores.utility) | Reliability: $($tractScores.reliability)" -ForegroundColor Cyan
+    if ($null -ne $kappa) {
+        $kDir = if ($kappa -gt 0) { "↗" } elseif ($kappa -lt 0) { "↘" } else { "→" }
+        Write-Host "  Kappa: $kDir $kappa (trailing trend)" -ForegroundColor $(if($kappa -gt 0){'Green'}elseif($kappa -lt 0){'Red'}else{'Gray'})
+    }
+
+    # 3-Tract Decision Matrix (replaces single keep/discard)
+    $correctnessScore = if ($tractScores.correctness) { $tractScores.correctness } else { $benchResult.score }
+    $utilityScore = if ($tractScores.utility) { $tractScores.utility } else { 0 }
+    $reliabilityScore = if ($tractScores.reliability) { $tractScores.reliability } else { 0 }
+    $regressionThreshold = 95  # Correctness below this = regression
+
+    if ($correctnessScore -lt $regressionThreshold) {
+        Log "DECISION: ROLLBACK — Correctness dropped to $correctnessScore (threshold: $regressionThreshold)"
+        Write-Host "  🛑 DECISION: ROLLBACK (Correctness regression)" -ForegroundColor Red
+    } elseif ($utilityScore -gt 80 -or $reliabilityScore -gt 80) {
+        Log "DECISION: KEEP — Utility=$utilityScore Reliability=$reliabilityScore (new capability gained)"
+        Write-Host "  ✅ DECISION: KEEP (forward progress detected)" -ForegroundColor Green
+    } elseif ($kappa -gt 0) {
+        Log "DECISION: KEEP — Kappa=$kappa (positive trailing trend)"
+        Write-Host "  ✅ DECISION: KEEP (positive trend)" -ForegroundColor Green
+    } else {
+        Log "DECISION: NO_CHANGE — Correctness stable, no forward progress (kappa=$kappa)"
+        Write-Host "  ➡️ DECISION: NO_CHANGE (no headroom — need harder evaluation)" -ForegroundColor Yellow
+    }
 
     # Best-So-Far Gate (Paper Algorithm 1, line 14)
     $bestScoreFile = "$CycleDir\baseline.json"

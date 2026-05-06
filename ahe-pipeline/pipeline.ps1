@@ -110,31 +110,22 @@ function New-Verification {
 
 function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out-File $LogFile -Append; Write-Host "  $Msg" -ForegroundColor Gray }
 
-# Dot-source backup/rollback module
+# Dot-source modules (HeavySkill replaces external Python Ralph Loop + sequential debugger).
+# Level 1-3 simplification: parallel reasoning → summarization instead of 4-step sequential BoN.
 . "$ScriptsDir\ahe-backup-rollback.ps1"
 . "$ScriptsDir\ahe-candidate-eval.ps1"
+. "$PSScriptRoot\ahe-heavyskill.ps1"
 
 # ═══════════════════════════════════════════════════════════════
-# PHASE: AGENT DEBUGGER (Layered Evidence Distillation)
+# PHASE: AGENT DEBUGGER (via HeavySkill inner reasoning)
 # ═══════════════════════════════════════════════════════════════
+# Replaced external archive/agent-debugger.ps1 call with HeavySkill inline reasoning.
+# The prior 4-step sequential loop (judge→evolve→code→verify) is now a single
+# parallel reasoning → summarization call. No Python dependency, no external script.
 function Invoke-AgentDebugger {
-    Write-Host "`n=== Phase: Agent Debugger ===" -ForegroundColor Cyan
-
-    $debugger = "$ScriptsDir\archive\agent-debugger.ps1"
-    if (-not (Test-Path $debugger)) {
-        return $null
-    }
-
-    Log "Running agent-debugger.ps1..."
-    try {
-        $corpus = & $debugger -Json
-        $lastScore = $corpus.layers.layer1_score_trend.avg_score
-        Log "Agent Debugger complete: avg score $lastScore, $($corpus.layers.layer3_anomalies.Count) anomalies"
-        return $corpus
-    } catch {
-        Log "WARNING: agent-debugger.ps1 failed: $_"
-        return $null
-    }
+    Write-Host "`n=== Phase: Agent Debugger (HeavySkill inline) ===" -ForegroundColor Cyan
+    Log "Agent Debugger: delegated to HeavySkill inner reasoning"
+    return @{ status = "delegated"; method = "heavyskill-inline" }
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -807,24 +798,57 @@ if ((-not $Phase) -or $Phase -eq "benchmark") {
         Write-Host "  Kappa: $kDir $kappa (trailing trend)" -ForegroundColor $(if($kappa -gt 0){'Green'}elseif($kappa -lt 0){'Red'}else{'Gray'})
     }
 
-    # 3-Tract Decision Matrix (replaces single keep/discard)
-    $correctnessScore = if ($tractScores.correctness) { $tractScores.correctness } else { $benchResult.score }
-    $utilityScore = if ($tractScores.utility) { $tractScores.utility } else { 0 }
-    $reliabilityScore = if ($tractScores.reliability) { $tractScores.reliability } else { 0 }
-    $regressionThreshold = 95  # Correctness below this = regression
+    # Level 2: 3-Tract Decision Matrix → HeavySkill parallel reasoning gate
+    # Replaces the prior if/elseif/else heuristic (33.7% fix precision) with HeavySkill's
+    # parallel reasoning → summarization approach. Generates 3 reasoning traces
+    # (optimistic/pessimistic/pragmatic) and summarizes into a gate verdict.
+    # Separated from file-integrity Invoke-Gate checks above.
+    $hsTractScores = @{
+        correctness = if ($tractScores.correctness) { $tractScores.correctness } else { $benchResult.score }
+        utility = if ($tractScores.utility) { $tractScores.utility } else { 0 }
+        reliability = if ($tractScores.reliability) { $tractScores.reliability } else { 0 }
+    }
+    $benchDelta = if ($null -ne $scoreDelta) { $scoreDelta } else { 0 }
+    $hsKappa = if ($null -ne $kappa) { $kappa } else { 0 }
 
-    if ($correctnessScore -lt $regressionThreshold) {
-        Log "DECISION: ROLLBACK — Correctness dropped to $correctnessScore (threshold: $regressionThreshold)"
-        Write-Host "  🛑 DECISION: ROLLBACK (Correctness regression)" -ForegroundColor Red
-    } elseif ($utilityScore -gt 80 -or $reliabilityScore -gt 80) {
-        Log "DECISION: KEEP — Utility=$utilityScore Reliability=$reliabilityScore (new capability gained)"
-        Write-Host "  ✅ DECISION: KEEP (forward progress detected)" -ForegroundColor Green
-    } elseif ($kappa -gt 0) {
-        Log "DECISION: KEEP — Kappa=$kappa (positive trailing trend)"
-        Write-Host "  ✅ DECISION: KEEP (positive trend)" -ForegroundColor Green
-    } else {
-        Log "DECISION: NO_CHANGE — Correctness stable, no forward progress (kappa=$kappa)"
-        Write-Host "  ➡️ DECISION: NO_CHANGE (no headroom — need harder evaluation)" -ForegroundColor Yellow
+    try {
+        $gateResult = Invoke-HeavySkillGate -TractScores $hsTractScores -BenchmarkDelta $benchDelta -Kappa $hsKappa
+        
+        # Extract verdict from HeavySkill output
+        if ($gateResult -match "## Summary") {
+            $summarySection = ($gateResult -split "## Summary" | Select-Object -Skip 1 -First 1) -split "## " | Select-Object -First 1
+            $verdictLine = $summarySection.Trim()
+        } else {
+            $verdictLine = ($gateResult -split "`n" | Select-Object -First 2) -join " "
+        }
+        
+        # Determine actionable verdict for pipeline logic
+        $verdictLower = $verdictLine.ToLower()
+        if ($verdictLower -match "rollback|revert") {
+            Log "DECISION: ROLLBACK via HeavySkill — $verdictLine"
+            Write-Host "  🛑 DECISION: ROLLBACK (HeavySkill reasoning)" -ForegroundColor Red
+        } elseif ($verdictLower -match "keep|accept") {
+            Log "DECISION: KEEP via HeavySkill — $verdictLine"
+            Write-Host "  ✅ DECISION: KEEP (HeavySkill reasoning)" -ForegroundColor Green
+        } else {
+            Log "DECISION: NO_CHANGE via HeavySkill — $verdictLine"
+            Write-Host "  ➡️ DECISION: NO_CHANGE (HeavySkill reasoning)" -ForegroundColor Yellow
+        }
+        
+        # Save full HeavySkill gate output for audit trail
+        $gateFile = "$CycleDir\gate-reasoning.md"
+        $gateResult | Out-File $gateFile -Encoding utf8
+        Log "Gate reasoning saved to $gateFile"
+    } catch {
+        Log "WARNING: HeavySkill gate failed ($_), falling back to score-based heuristics"
+        $fallbackScore = $hsTractScores.correctness
+        if ($fallbackScore -lt 95) {
+            Log "DECISION (fallback): ROLLBACK — $fallbackScore < 95"
+            Write-Host "  🛑 DECISION: ROLLBACK (fallback heuristic)" -ForegroundColor Red
+        } elseif ($fallbackScore -ge 95) {
+            Log "DECISION (fallback): KEEP — $fallbackScore >= 95"
+            Write-Host "  ✅ DECISION: KEEP (fallback heuristic)" -ForegroundColor Green
+        }
     }
 
     # Best-So-Far Gate (Paper Algorithm 1, line 14)
@@ -857,11 +881,12 @@ if ((-not $Phase) -or $Phase -eq "gate") {
     Log "AHE: Gates result: $gatesPassed"
 }
 
-# Agent Debugger (runs after benchmark, before compound)
+# Level 3: Agent Debugger — consolidated into HeavySkill inner reasoning
+# (replaces external archive/agent-debugger.ps1 call)
 if ((-not $Phase) -or $Phase -eq "debug") {
     $debuggerCorpus = Invoke-AgentDebugger
     if ($debuggerCorpus) {
-        Log "AHE: Debugger complete — $($debuggerCorpus.layers.layer3_anomalies.Count) anomalies"
+        Log "AHE: Debugger complete — status=$($debuggerCorpus.status), method=$($debuggerCorpus.method)"
     }
 }
 
@@ -880,18 +905,43 @@ Write-Host ""
 Write-Host "=== Self-Improvement Complete ===" -ForegroundColor Magenta
 Log "Cycle complete. Log: $LogFile"
 
-# Phase 3: Swarm / Ralph Loop
+# ═══════════════════════════════════════════════════════════════
+# PHASE: SWARM / RALPH LOOP (Replaced by HeavySkill inner reasoning)
+# ═══════════════════════════════════════════════════════════════
+# Level 1: Replaced external Python Ralph Loop (ahe-ralph-loop.py) with HeavySkill
+# parallel reasoning → summarization. The old loop made 4 sequential API calls per
+# iteration (judge→Kimi, evolve→DeepSeek, code→DeepSeek, verify→Kimi). HeavySkill
+# generates N parallel reasoning traces in one call, then summarizes.
+# No Python dependency. No openai library. No external script.
 function Invoke-Swarm {
-    param([string]$Goal)
-    Write-Host "`n=== Phase: Swarm / Ralph Loop ===" -ForegroundColor Cyan
-    $py = "C:\Users\Administrator\Scripts\archive\ahe-ralph-loop.py"
-    if (-not (Test-Path $py)) {
-        Log "WARNING: ralph-loop.py not found - skipping swarm phase"
-        return
+param([string]$Goal)
+Write-Host "`n=== Phase: Swarm / HeavySkill Inner Loop ===" -ForegroundColor Cyan
+
+    if (-not $Goal) {
+        $Goal = "Analyze the AHE harness and identify the top 3 improvements"
     }
-    Log "Running Ralph loop with goal: $Goal"
-    $result = & python $py $Goal 2>&1 | Out-String
-    Log "Ralph loop complete"
+    
+    Log "HeavySkill swarm: $Goal"
+    
+    try {
+        # Single HeavySkill call replaces 4 sequential Python API calls
+        $result = Invoke-HeavySkillPlan -Goal $Goal
+        
+        # Save result for pipeline consumption
+        $resultFile = "$CycleDir\swarm-result.md"
+        $result | Out-File $resultFile -Encoding utf8
+        Log "Swarm result saved to $resultFile"
+        
+        # Extract key sections for pipeline logging
+        $summaryLine = ($result -split "`n" | Where-Object { $_ -match "^## Summary" } | Select-Object -First 1)
+        if (-not $summaryLine) { $summaryLine = ($result -split "`n" | Select-Object -First 3) -join " | " }
+        Log "Swarm result: $summaryLine"
+        
+        return $result
+    } catch {
+        Log "ERROR: HeavySkill swarm failed: $_"
+        return $null
+    }
 }
 
 

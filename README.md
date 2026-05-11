@@ -1,50 +1,63 @@
-# armchairfuturist-code
+# AHE — Agentic Harness Evolution
 
 Personal automation harnesses, self-improving pipelines, and dev tools for AI-augmented development on Windows.
 
-## AHE Pipeline - Self-Improvement Loop
+## What is AHE?
 
-The core system: an Agentic Harness Engineering (AHE) pipeline inspired by [arXiv:2604.25850](https://arxiv.org/html/2604.25850v3).
+AHE is an **intelligence layer** that sits on top of Qwen Code, turning it from a semi-autonomous coding harness into a fully self-improving system. It discovers improvements via nightly research, benchmarks their impact with multi-tract evaluation, applies safe changes with rollback safety, and surfaces findings inside Qwen Code sessions via hooks.
 
-### Core Scripts (`ahe-pipeline/`)
+Think of it as the methodology layer GSD adds to pi, but for Qwen Code: **Pi → GSD :: Qwen Code → AHE**.
 
-| Script | Purpose |
-|--------|---------|
-| `pipeline.ps1` | Main orchestration |
-| `benchmark.ps1` | AHE-weighted benchmark (24 tests, multi-rollout median) |
-| `tools.ps1` | Dispatch wrapper |
-| `ahe-evolve.ps1` | CE skill linker |
-| `ahe-backup-rollback.ps1` | Safety: snapshots + reverts |
-| `self-heal.bat` | Menu frontend |
-| `bm-module.ps1` | HardTests module |
+## Architecture
 
-### Archive Scripts (`ahe-pipeline/archive/`)
+AHE integrates through Qwen Code's native **hooks system** (SessionStart, PreToolUse):
 
-Utility scripts: agent-debugger, verify-mcps, security-audit, benchmark-system, full-cleanup, optimize-system, hard-tests, validate-settings and more.
+```
+Nightly Pipeline (AHENightlyAudit @ 2AM)
+  → research + benchmark + compound
+  ↓
+Reseed Bridge (AHEDailyBrief @ 7AM + session start)
+  → writes pipeline-findings.json
+  ↓
+Startup Hook (ahe-startup-check.js)
+  → reads pipeline findings, generates health report in conversation
+  ↓
+Heartbeat Hook (ahe-session-heartbeat.js)
+  → tracks every tool call for reliable session capture
+```
 
-### Utility Scripts (`scripts/`)
+## Current State
 
-sync-obsidian, update-plugins, update-crofai-models.
+**Milestone M001 complete** — Wired the AHE loop:
+
+| Component | Status |
+|-----------|--------|
+| SessionStart hook | Registered + firing |
+| PreToolUse hook | Registered + tracking |
+| Reseed bridge | Running daily |
+| Pipeline findings | Visible in health report |
+| Session manifests | Heartbeat-backed + stale inference |
+| AHEDailyBrief (7AM) | Fixed |
+| AHENightlyAudit (2AM) | Running |
 
 ## Quick Start
 
 ```powershell
+# Run the improvement pipeline
 .\ahe-pipeline\pipeline.ps1
-.\ahe-pipeline\pipeline.ps1 -Phase benchmark
-.\ahe-pipeline\self-heal.bat
+
+# Check AHE functionality (all 16 components)
+node C:\Users\Administrator\.qwen\ahe-doctor.cjs
 ```
 
-## autocontext Integration
+## Core Scripts
 
-The pipeline integrates [autocontext](https://github.com/greyhaven-ai/autocontext) (greyhaven-ai) as a Qwen Code MCP server.
+See `ahe-pipeline/`: pipeline.ps1 (7-phase orchestration), benchmark.ps1 (25 tests, k=3 multi-rollout, 3-tract scoring), ahe-heavyskill.ps1 (parallel reasoning gate), ahe-backup-rollback.ps1 (snapshot safety).
 
-### What it provides
-- **Knowledge compounding** — benchmark results exported to autocontext-readable format
-- **Playbook accumulation** — cross-session knowledge via autocontext knowledge dirs
-- **5-role evaluation** — autocontext MCP tools available as `autocontext_*` tools in Qwen Code
+## Research Foundation
 
-### Setup
-Configured in `settings.json` MCP servers. Uses crof.ai OpenAI-compatible provider with `deepseek-v4-pro-precision`.
+Inspired by AHE (2604.25850), RecursiveMAS (2604.25917), HeavySkill (2605.02396), HAL (2510.11977), ResearchGym (2602.15112), Geometry of Benchmarks (2512.04276), and TRACE (2510.00415).
 
 ## License
+
 MIT

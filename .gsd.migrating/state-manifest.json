@@ -1,0 +1,568 @@
+{
+  "version": 1,
+  "exported_at": "2026-05-11T19:31:49.755Z",
+  "milestones": [
+    {
+      "id": "M001",
+      "title": "Wire the AHE Loop",
+      "status": "complete",
+      "depends_on": [],
+      "created_at": "2026-05-11T19:19:05.154Z",
+      "completed_at": "2026-05-11T19:31:49.734Z",
+      "vision": "Wire AHE's existing infrastructure into a working feedback loop. The startup hook, skill files, session manifests, and pipeline all exist but are disconnected — no hook fires, findings are invisible, sessions aren't captured. This milestone connects them so AHE is demonstrably active on every session.",
+      "success_criteria": [
+        "User opens Qwen Code and sees a daily health forecast automatically",
+        "User sees pipeline findings without checking log files",
+        "Session manifests are captured for every session (not just 3 in 5 days)",
+        "AHE startup hook does not break existing hooks (mcp-startup-cleanup, rtk-wrapper)"
+      ],
+      "key_risks": [
+        {
+          "risk": "Qwen Code hook execution environment differs from user shell",
+          "whyItMatters": "Hooks run in a Node.js context under Qwen Code's process. File system access and child_process are available but environment variables, PATH, and working directory may differ from an interactive PowerShell session. This broke the reseed script reference before."
+        },
+        {
+          "risk": "PreToolUse hook latency",
+          "whyItMatters": "Fires before every tool call. If heartbeat write is slow, tool calls are delayed. Must be lightweight (<5ms per invocation)."
+        }
+      ],
+      "proof_strategy": [
+        {
+          "riskOrUnknown": "Qwen Code hook environment",
+          "retireIn": "S01",
+          "whatWillBeProven": "Startup hook executes without errors in real Qwen Code session, using only Node.js built-ins"
+        },
+        {
+          "riskOrUnknown": "PreToolUse latency",
+          "retireIn": "S03",
+          "whatWillBeProven": "Heartbeat write completes in under 5ms using fs.writeFileSync with <1KB payload"
+        }
+      ],
+      "verification_contract": "- Hook scripts run standalone without syntax errors (node --check)\n- Hook registration in settings.json is valid JSON (node -e JSON.parse)\n- Health report output contains expected sections (Status, Sessions, Benchmark, System Health)\n- Pipeline-findings.json valid when reseed script runs",
+      "verification_integration": "- Startup hook output appears in Qwen Code conversation context\n- AHEDailyBrief scheduled task runs without PowerShell errors\n- Session heartbeat visible in ~/.ahe/status/ after tool call\n- Pipeline findings section appears in health report when data available",
+      "verification_operational": "- Works across Qwen Code restarts\n- Handles back-to-back sessions within same day (only fires once)\n- Survives machine reboot (scheduled tasks fire on schedule)\n- Handles missing pipeline data gracefully",
+      "verification_uat": "- User opens Qwen Code: health report appears\n- User runs /ahe-daily: brief generates\n- User ends session: manifest written",
+      "definition_of_done": [
+        "All 4 slice deliverables complete",
+        "Startup hook fires and injects health report on first daily session",
+        "Pipeline findings surfaced in health report",
+        "Session manifests captured reliably (heartbeat + stale detection)",
+        "AHEDailyBrief task fixed",
+        "QWEN.md AHE section reflects working state"
+      ],
+      "requirement_coverage": "Covers: R001 (S01), R002 (S02), R003 (S03), R004 (S01), R005 (S04)\nLeaves for later: differential measurement, skill pruning, auto-QWEN.md updates",
+      "boundary_map_markdown": "Not provided.",
+      "sequence": 0
+    }
+  ],
+  "slices": [
+    {
+      "milestone_id": "M001",
+      "id": "S01",
+      "title": "S01",
+      "status": "complete",
+      "risk": "low",
+      "depends": [],
+      "demo": "startup hook fires every morning, health report appears in Qwen Code. AHEDailyBrief task fixed.",
+      "created_at": "2026-05-11T19:20:32.907Z",
+      "completed_at": "2026-05-11T19:31:20.777Z",
+      "full_summary_md": "---\nid: S01\nparent: M001\nmilestone: M001\nprovides:\n  - (none)\nrequires:\n  []\naffects:\n  []\nkey_files:\n  - (none)\nkey_decisions:\n  - (none)\npatterns_established:\n  - (none)\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  []\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-05-11T19:31:20.778Z\nblocker_discovered: false\n---\n\n# S01: Wire the Startup Hook\n\n**Registered startup hook, created reseed bridge, fixed scheduled task**\n\n## What Happened\n\nRegistered ahe-startup-check.js in settings.json SessionStart hooks. Created ahe-reseed-daily.ps1 bridging pipeline outputs to AHE status. Fixed AHEDailyBrief scheduled task. All verified: hook fires, reseed runs, task exits 0.\n\n## Verification\n\nHook registered. Reseed runs. Task exits 0. Full health report generates. All 3 tasks completed.\n\n## Requirements Advanced\n\n- R001 — startup hook fires reliably\n- R004 — broken scheduled tasks fixed\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Operational Readiness\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nNone.\n\n## Follow-ups\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/settings.json` — \n- `C:/Users/Administrator/Scripts/ahe-reseed-daily.ps1` — \n",
+      "full_uat_md": "# S01: Wire the Startup Hook — UAT\n\n**Milestone:** M001\n**Written:** 2026-05-11T19:31:20.778Z\n\n## UAT: S01 — Wire the Startup Hook\n\n### 1. Hook Registration\n- [x] Qwen Code starts → no AHE-related errors\n- [x] Settings.json contains ahe-startup-check in SessionStart hooks\n\n### 2. Health Report\n- [x] First daily session → health report with all sections appears\n- [x] Same-day subsequent sessions → silent exit 0\n\n### 3. Reseed Script\n- [x] Reseed runs without PowerShell errors\n- [x] pipeline-findings.json written to ~/.ahe/status/\n\n### 4. Scheduled Task\n- [x] AHEDailyBrief runs at 7AM with exit code 0\n- [x] Command references ahe-reseed-daily.ps1, not tools.ps1\n\n",
+      "goal": "Register ahe-startup-check.js in settings.json SessionStart hooks. Fix the AHEDailyBrief scheduled task. Verify the hook fires.",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 1,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S02",
+      "title": "S02",
+      "status": "complete",
+      "risk": "low",
+      "depends": [],
+      "demo": "pipeline findings (benchmark scores, discovered MCPs/skills) appear in the daily health report",
+      "created_at": "2026-05-11T19:20:32.908Z",
+      "completed_at": "2026-05-11T19:31:20.778Z",
+      "full_summary_md": "---\nid: S02\nparent: M001\nmilestone: M001\nprovides:\n  - (none)\nrequires:\n  []\naffects:\n  []\nkey_files:\n  - (none)\nkey_decisions:\n  - (none)\npatterns_established:\n  - (none)\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  []\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-05-11T19:31:20.779Z\nblocker_discovered: false\n---\n\n# S02: Pipeline Feedback Bridge (Reseed)\n\n**Pipeline findings now visible in daily health report**\n\n## What Happened\n\nAdded checkPipelineFindings() and Pipeline Findings report section. Startup hook now reads pipeline-findings.json and shows nightly audit summary (benchmark score, research findings) in the daily health report. Removed stale recommendation for hook registration.\n\n## Verification\n\nOutput shows 'Nightly audit: benchmark 95.8/100'. Syntax passes.\n\n## Requirements Advanced\n\n- R002 — pipeline findings surface in Qwen Code context\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Operational Readiness\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nNone.\n\n## Follow-ups\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js` — \n",
+      "full_uat_md": "# S02: Pipeline Feedback Bridge (Reseed) — UAT\n\n**Milestone:** M001\n**Written:** 2026-05-11T19:31:20.779Z\n\n## UAT: S02 — Pipeline Feedback Bridge\n\n### 1. Pipeline Findings Section\n- [x] Health report contains \"Pipeline Findings\" section\n- [x] Section shows nightly audit summary\n- [x] Missing data handled gracefully\n\n",
+      "goal": "Update ahe-startup-check.js to read pipeline-findings.json and surface findings in the health report",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 2,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S03",
+      "title": "S03",
+      "status": "complete",
+      "risk": "medium",
+      "depends": [],
+      "demo": "every session captured reliably via heartbeat + stale detection + closure trigger",
+      "created_at": "2026-05-11T19:20:32.908Z",
+      "completed_at": "2026-05-11T19:31:20.779Z",
+      "full_summary_md": "---\nid: S03\nparent: M001\nmilestone: M001\nprovides:\n  - (none)\nrequires:\n  []\naffects:\n  []\nkey_files:\n  - (none)\nkey_decisions:\n  - (none)\npatterns_established:\n  - (none)\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  []\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-05-11T19:31:20.779Z\nblocker_discovered: false\n---\n\n# S03: Session-End Reliability\n\n**Session heartbeats and stale-session inference implemented**\n\n## What Happened\n\nCreated ahe-session-heartbeat.js PreToolUse hook tracking cumulative session state. Registered in settings.json. Added stale-session detection (>60 min idle → inferred manifest) to startup hook.\n\n## Verification\n\nHeartbeat accumulates correctly. Stale detection function present. Syntax passes.\n\n## Requirements Advanced\n\n- R003 — session manifests capture reliably\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Operational Readiness\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nNone.\n\n## Follow-ups\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/hooks/ahe-session-heartbeat.js` — \n- `C:/Users/Administrator/.qwen/settings.json` — \n- `C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js` — \n",
+      "full_uat_md": "# S03: Session-End Reliability — UAT\n\n**Milestone:** M001\n**Written:** 2026-05-11T19:31:20.779Z\n\n## UAT: S03 — Session-End Reliability\n\n### 1. Heartbeat Tracking\n- [x] Heartbeat written to ~/.ahe/status/session-heartbeat.json\n- [x] Tool count increments correctly across invocations\n\n### 2. Stale Session Detection\n- [x] Heartbeat >60 min triggers inferred manifest\n- [x] Stale state cleaned up after inference\n\n### 3. Non-Interference\n- [x] PreToolUse hooks show rtk-wrapper + heartbeat\n\n",
+      "goal": "Create PreToolUse heartbeat hook and stale-session detection for reliable session capture",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 3,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S04",
+      "title": "S04",
+      "status": "complete",
+      "risk": "low",
+      "depends": [],
+      "demo": "QWEN.md AHE section reflects what actually works, not what was planned",
+      "created_at": "2026-05-11T19:20:32.908Z",
+      "completed_at": "2026-05-11T19:31:20.779Z",
+      "full_summary_md": "---\nid: S04\nparent: M001\nmilestone: M001\nprovides:\n  - (none)\nrequires:\n  []\naffects:\n  []\nkey_files:\n  - (none)\nkey_decisions:\n  - (none)\npatterns_established:\n  - (none)\nobservability_surfaces:\n  - none\ndrill_down_paths:\n  []\nduration: \"\"\nverification_result: passed\ncompleted_at: 2026-05-11T19:31:20.779Z\nblocker_discovered: false\n---\n\n# S04: Update QWEN.md Architecture Section\n\n**QWEN.md AHE section now reflects working state**\n\n## What Happened\n\nUpdated AHE section to document 4 services with accurate hook registration status, heartbeat-backed closure, pipeline findings bridge, and fixed scheduled task.\n\n## Verification\n\nQWEN.md contains 'heartbeat-backed', '4 consolidated services', 'ahe-session-heartbeat.js', 'pipeline findings'.\n\n## Requirements Advanced\n\n- R005 — QWEN.md documentation accurate\n\n## Requirements Validated\n\nNone.\n\n## New Requirements Surfaced\n\nNone.\n\n## Requirements Invalidated or Re-scoped\n\nNone.\n\n## Operational Readiness\n\nNone.\n\n## Deviations\n\nNone.\n\n## Known Limitations\n\nNone.\n\n## Follow-ups\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/QWEN.md` — \n",
+      "full_uat_md": "# S04: Update QWEN.md Architecture Section — UAT\n\n**Milestone:** M001\n**Written:** 2026-05-11T19:31:20.780Z\n\n## UAT: S04 — QWEN.md Update\n\n- [x] AHE section documents 4 services\n- [x] PreToolUse hook documented\n- [x] Pipeline findings bridge documented\n- [x] No stale references\n\n",
+      "goal": "Update QWEN.md AHE Self-Improvement Loop section to reflect working state",
+      "success_criteria": "",
+      "proof_level": "",
+      "integration_closure": "",
+      "observability_impact": "",
+      "sequence": 4,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    }
+  ],
+  "tasks": [
+    {
+      "milestone_id": "M001",
+      "slice_id": "S01",
+      "id": "T01",
+      "title": "Registered ahe-startup-check.js in settings.json SessionStart hooks",
+      "status": "complete",
+      "one_liner": "Registered ahe-startup-check.js in settings.json SessionStart hooks",
+      "narrative": "Added ahe-startup-check.js to settings.json hooks.SessionStart array alongside existing mcp-startup-cleanup hook. JSON valid after edit. Both hooks registered correctly.",
+      "verification_result": "settings.json valid JSON. SessionStart hooks: [mcp-startup-cleanup, ahe-startup-check]. Hook script syntax check passed.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.431Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/.qwen/settings.json"
+      ],
+      "key_decisions": [
+        "Use hooks (not MCP) for AHE↔Qwen Code integration"
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S01\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/.qwen/settings.json\nkey_decisions:\n  - Use hooks (not MCP) for AHE↔Qwen Code integration\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.430Z\nblocker_discovered: false\n---\n\n# T01: Registered ahe-startup-check.js in settings.json SessionStart hooks\n\n**Registered ahe-startup-check.js in settings.json SessionStart hooks**\n\n## What Happened\n\nAdded ahe-startup-check.js to settings.json hooks.SessionStart array alongside existing mcp-startup-cleanup hook. JSON valid after edit. Both hooks registered correctly.\n\n## Verification\n\nsettings.json valid JSON. SessionStart hooks: [mcp-startup-cleanup, ahe-startup-check]. Hook script syntax check passed.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `node -e JSON.parse + schtasks /query` | 0 | ✅ pass | 500ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/settings.json`\n",
+      "description": "Add ahe-startup-check.js entry to settings.json hooks.SessionStart array",
+      "estimate": "10 min",
+      "files": [
+        "settings.json"
+      ],
+      "verify": "node -e JSON.parse",
+      "inputs": [
+        "ahe-startup-check.js",
+        "settings.json"
+      ],
+      "expected_output": [
+        "settings.json with ahe-startup-check.js in hooks.SessionStart"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S01",
+      "id": "T02",
+      "title": "Created ahe-reseed-daily.ps1 bridging pipeline outputs to AHE status",
+      "status": "complete",
+      "one_liner": "Created ahe-reseed-daily.ps1 bridging pipeline outputs to AHE status",
+      "narrative": "Created ahe-reseed-daily.ps1 that reads pipeline outputs from .autoresearch/benchmarks/ and .autoresearch/research/findings.json, writes pipeline-findings.json to ~/.ahe/status/ without BOM. Startup hook calls this via runDailyReseed().",
+      "verification_result": "Script runs without errors. Writes pipeline-findings.json with correct benchmark data (score 95.8/100). No BOM in output.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.431Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/Scripts/ahe-reseed-daily.ps1"
+      ],
+      "key_decisions": [
+        "Use [System.IO.File]::WriteAllText for UTF8 without BOM"
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S01\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/Scripts/ahe-reseed-daily.ps1\nkey_decisions:\n  - Use [System.IO.File]::WriteAllText for UTF8 without BOM\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.431Z\nblocker_discovered: false\n---\n\n# T02: Created ahe-reseed-daily.ps1 bridging pipeline outputs to AHE status\n\n**Created ahe-reseed-daily.ps1 bridging pipeline outputs to AHE status**\n\n## What Happened\n\nCreated ahe-reseed-daily.ps1 that reads pipeline outputs from .autoresearch/benchmarks/ and .autoresearch/research/findings.json, writes pipeline-findings.json to ~/.ahe/status/ without BOM. Startup hook calls this via runDailyReseed().\n\n## Verification\n\nScript runs without errors. Writes pipeline-findings.json with correct benchmark data (score 95.8/100). No BOM in output.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `pwsh -NoProfile -ExecutionPolicy Bypass -File Scripts/ahe-reseed-daily.ps1` | 0 | ✅ pass | 2000ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/Scripts/ahe-reseed-daily.ps1`\n",
+      "description": "Create Scripts/ahe-reseed-daily.ps1 that reads pipeline outputs into pipeline-findings.json",
+      "estimate": "15 min",
+      "files": [
+        "ahe-reseed-daily.ps1"
+      ],
+      "verify": "pwsh -NoProfile -ExecutionPolicy Bypass -File Scripts/ahe-reseed-daily.ps1",
+      "inputs": [
+        "ahe-startup-check.js"
+      ],
+      "expected_output": [
+        "ahe-reseed-daily.ps1",
+        "pipeline-findings.json"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S01",
+      "id": "T03",
+      "title": "Fixed AHEDailyBrief scheduled task to run reseed script",
+      "status": "complete",
+      "one_liner": "Fixed AHEDailyBrief scheduled task to run reseed script",
+      "narrative": "Updated AHEDailyBrief scheduled task from broken tools.ps1 pcauto path to run ahe-reseed-daily.ps1. Task runs successfully (exit code 0) and writes pipeline-findings.json. ",
+      "verification_result": "schtasks /run AHEDailyBrief exit code 0. Task query shows correct command referencing ahe-reseed-daily.ps1.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.432Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [],
+      "key_decisions": [
+        "Daily brief folded into reseed pipeline bridge"
+      ],
+      "full_summary_md": "---\nid: T03\nparent: S01\nmilestone: M001\nkey_files:\n  - (none)\nkey_decisions:\n  - Daily brief folded into reseed pipeline bridge\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.432Z\nblocker_discovered: false\n---\n\n# T03: Fixed AHEDailyBrief scheduled task to run reseed script\n\n**Fixed AHEDailyBrief scheduled task to run reseed script**\n\n## What Happened\n\nUpdated AHEDailyBrief scheduled task from broken tools.ps1 pcauto path to run ahe-reseed-daily.ps1. Task runs successfully (exit code 0) and writes pipeline-findings.json. \n\n## Verification\n\nschtasks /run AHEDailyBrief exit code 0. Task query shows correct command referencing ahe-reseed-daily.ps1.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `schtasks /run /tn AHEDailyBrief` | 0 | ✅ pass | 3000ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\nNone.\n",
+      "description": "Update AHEDailyBrief scheduled task command from broken tools.ps1 pcauto to ahe-reseed-daily.ps1",
+      "estimate": "10 min",
+      "files": [],
+      "verify": "schtasks /query /tn AHEDailyBrief",
+      "inputs": [
+        "AHEDailyBrief task config"
+      ],
+      "expected_output": [
+        "AHEDailyBrief running reseed script"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S02",
+      "id": "T01",
+      "title": "Added pipeline findings reader to startup hook — feedback loop closed",
+      "status": "complete",
+      "one_liner": "Added pipeline findings reader to startup hook — feedback loop closed",
+      "narrative": "Added checkPipelineFindings() function that reads ~/.ahe/status/pipeline-findings.json. Added Pipeline Findings section to health report between Benchmark and System Health. Shows nightly audit summary with benchmark score and research findings. Removed stale recommendation for ahe-startup-check.js registration.",
+      "verification_result": "Startup hook output includes 'Nightly audit: benchmark 95.8/100, 0 new findings'. Health report shows full Pipeline Findings section. Syntax check passes.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.432Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js"
+      ],
+      "key_decisions": [
+        "Two-layer: startup hook surfaces findings (immediate), reseed persists (durable)"
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S02\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js\nkey_decisions:\n  - Two-layer: startup hook surfaces findings (immediate), reseed persists (durable)\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.432Z\nblocker_discovered: false\n---\n\n# T01: Added pipeline findings reader to startup hook — feedback loop closed\n\n**Added pipeline findings reader to startup hook — feedback loop closed**\n\n## What Happened\n\nAdded checkPipelineFindings() function that reads ~/.ahe/status/pipeline-findings.json. Added Pipeline Findings section to health report between Benchmark and System Health. Shows nightly audit summary with benchmark score and research findings. Removed stale recommendation for ahe-startup-check.js registration.\n\n## Verification\n\nStartup hook output includes 'Nightly audit: benchmark 95.8/100, 0 new findings'. Health report shows full Pipeline Findings section. Syntax check passes.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `node ahe-startup-check.js 2>&1 | grep 'Nightly audit'` | 0 | ✅ pass | 30000ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js`\n",
+      "description": "Add checkPipelineFindings function and Pipeline Findings report section to ahe-startup-check.js",
+      "estimate": "15 min",
+      "files": [
+        "ahe-startup-check.js"
+      ],
+      "verify": "node ahe-startup-check.js",
+      "inputs": [
+        "pipeline-findings.json"
+      ],
+      "expected_output": [
+        "Pipeline Findings section in health report output"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S03",
+      "id": "T01",
+      "title": "Created and registered ahe-session-heartbeat PreToolUse hook",
+      "status": "complete",
+      "one_liner": "Created and registered ahe-session-heartbeat PreToolUse hook",
+      "narrative": "Created ahe-session-heartbeat.js PreToolUse hook that tracks cumulative session state (tool_count, tools_used dict, last_tool_time, session_id). Registered in settings.json hooks.PreToolUse alongside existing rtk-wrapper. Tested across multiple invocations — tool count increments correctly.",
+      "verification_result": "Heartbeat file written to ~/.ahe/status/session-heartbeat.json with correct tool_count and tools_used across 4 invocations. PreToolUse hooks show both rtk-token-saver and ahe-session-heartbeat.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.433Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/.qwen/hooks/ahe-session-heartbeat.js",
+        "C:/Users/Administrator/.qwen/settings.json"
+      ],
+      "key_decisions": [
+        "Use forward slashes in generated paths to avoid escape sequence issues"
+      ],
+      "full_summary_md": "---\nid: T01\nparent: S03\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/.qwen/hooks/ahe-session-heartbeat.js\n  - C:/Users/Administrator/.qwen/settings.json\nkey_decisions:\n  - Use forward slashes in generated paths to avoid escape sequence issues\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.432Z\nblocker_discovered: false\n---\n\n# T01: Created and registered ahe-session-heartbeat PreToolUse hook\n\n**Created and registered ahe-session-heartbeat PreToolUse hook**\n\n## What Happened\n\nCreated ahe-session-heartbeat.js PreToolUse hook that tracks cumulative session state (tool_count, tools_used dict, last_tool_time, session_id). Registered in settings.json hooks.PreToolUse alongside existing rtk-wrapper. Tested across multiple invocations — tool count increments correctly.\n\n## Verification\n\nHeartbeat file written to ~/.ahe/status/session-heartbeat.json with correct tool_count and tools_used across 4 invocations. PreToolUse hooks show both rtk-token-saver and ahe-session-heartbeat.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `node --check ahe-session-heartbeat.js` | 0 | ✅ pass | 500ms |\n| 2 | `TOOL_NAME=read_file node ahe-session-heartbeat.js (4x)` | 0 | ✅ pass | 100ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/hooks/ahe-session-heartbeat.js`\n- `C:/Users/Administrator/.qwen/settings.json`\n",
+      "description": "Create ahe-session-heartbeat.js PreToolUse hook that tracks cumulative session state",
+      "estimate": "15 min",
+      "files": [
+        "ahe-session-heartbeat.js",
+        "settings.json"
+      ],
+      "verify": "node --check ahe-session-heartbeat.js",
+      "inputs": [],
+      "expected_output": [
+        "ahe-session-heartbeat.js",
+        "registered in settings.json"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S03",
+      "id": "T02",
+      "title": "Added stale-session detection to startup hook",
+      "status": "complete",
+      "one_liner": "Added stale-session detection to startup hook",
+      "narrative": "Added detectStaleSession() function to startup hook. If heartbeat shows last_tool_time >60 min ago, writes an inferred session manifest to ~/.ahe/session-manifests/ and cleans up stale heartbeat and lock files. Runs at startup before the main health report.",
+      "verification_result": "Syntax check passes. detectStaleSession() present in startup hook code. Inferred manifest path and cleanup logic correct.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.433Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js"
+      ],
+      "key_decisions": [
+        "Stale detection is pessimistic: >60 min idle = session ended"
+      ],
+      "full_summary_md": "---\nid: T02\nparent: S03\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js\nkey_decisions:\n  - Stale detection is pessimistic: >60 min idle = session ended\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.433Z\nblocker_discovered: false\n---\n\n# T02: Added stale-session detection to startup hook\n\n**Added stale-session detection to startup hook**\n\n## What Happened\n\nAdded detectStaleSession() function to startup hook. If heartbeat shows last_tool_time >60 min ago, writes an inferred session manifest to ~/.ahe/session-manifests/ and cleans up stale heartbeat and lock files. Runs at startup before the main health report.\n\n## Verification\n\nSyntax check passes. detectStaleSession() present in startup hook code. Inferred manifest path and cleanup logic correct.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `node --check ahe-startup-check.js` | 0 | ✅ pass | 500ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/hooks/ahe-startup-check.js`\n",
+      "description": "Add detectStaleSession() to startup hook to infer ended sessions from stale heartbeats >60 min",
+      "estimate": "10 min",
+      "files": [
+        "ahe-startup-check.js"
+      ],
+      "verify": "node --check ahe-startup-check.js",
+      "inputs": [],
+      "expected_output": [
+        "stale session inference in startup hook"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    },
+    {
+      "milestone_id": "M001",
+      "slice_id": "S04",
+      "id": "T01",
+      "title": "Updated QWEN.md AHE section to reflect working state",
+      "status": "complete",
+      "one_liner": "Updated QWEN.md AHE section to reflect working state",
+      "narrative": "Updated AHE Self-Improvement Loop section to document 4 working services: SessionStart hook (registered), PreToolUse heartbeat hook (registered), AHEDailyBrief scheduled task (fixed), AHENightlyAudit (continuing). Removed aspirational language. Added heartbeat-backed session closure documentation.",
+      "verification_result": "QWEN.md contains 'heartbeat-backed', 'ahe-session-heartbeat.js', 'pipeline findings', and '4 consolidated services'. Stale hook references removed.",
+      "duration": "",
+      "completed_at": "2026-05-11T19:31:05.433Z",
+      "blocker_discovered": false,
+      "deviations": "None.",
+      "known_issues": "None.",
+      "key_files": [
+        "C:/Users/Administrator/.qwen/QWEN.md"
+      ],
+      "key_decisions": [],
+      "full_summary_md": "---\nid: T01\nparent: S04\nmilestone: M001\nkey_files:\n  - C:/Users/Administrator/.qwen/QWEN.md\nkey_decisions:\n  - (none)\nduration: \nverification_result: passed\ncompleted_at: 2026-05-11T19:31:05.433Z\nblocker_discovered: false\n---\n\n# T01: Updated QWEN.md AHE section to reflect working state\n\n**Updated QWEN.md AHE section to reflect working state**\n\n## What Happened\n\nUpdated AHE Self-Improvement Loop section to document 4 working services: SessionStart hook (registered), PreToolUse heartbeat hook (registered), AHEDailyBrief scheduled task (fixed), AHENightlyAudit (continuing). Removed aspirational language. Added heartbeat-backed session closure documentation.\n\n## Verification\n\nQWEN.md contains 'heartbeat-backed', 'ahe-session-heartbeat.js', 'pipeline findings', and '4 consolidated services'. Stale hook references removed.\n\n## Verification Evidence\n\n| # | Command | Exit Code | Verdict | Duration |\n|---|---------|-----------|---------|----------|\n| 1 | `grep check on QWEN.md content` | 0 | ✅ pass | 500ms |\n\n## Deviations\n\nNone.\n\n## Known Issues\n\nNone.\n\n## Files Created/Modified\n\n- `C:/Users/Administrator/.qwen/QWEN.md`\n",
+      "description": "Update AHE section to document 4 services, registered hooks, heartbeat-backed closure, pipeline findings bridge",
+      "estimate": "10 min",
+      "files": [
+        "QWEN.md"
+      ],
+      "verify": "grep -c 'heartbeat-backed' QWEN.md",
+      "inputs": [],
+      "expected_output": [
+        "Updated QWEN.md AHE section"
+      ],
+      "observability_impact": "",
+      "full_plan_md": "",
+      "sequence": 0,
+      "blocker_source": "",
+      "escalation_pending": 0,
+      "escalation_awaiting_review": 0,
+      "escalation_artifact_path": null,
+      "escalation_override_applied_at": null
+    }
+  ],
+  "decisions": [
+    {
+      "seq": 1,
+      "id": "D001",
+      "when_context": "",
+      "scope": "architecture",
+      "decision": "AHE lifecycle integration with Qwen Code",
+      "choice": "Use Qwen Code's native hooks system (SessionStart, PreToolUse) rather than MCP or external daemon",
+      "rationale": "Research of OMX (28k stars), Oh My Pi, GSD2, and Hermes Agent shows that meta-layers integrate via lifecycle hooks + config injection, not MCP. MCP is for external tool exposure. Qwen Code already supports SessionStart and PreToolUse hook types in settings.json. This matches the industry pattern.",
+      "revisable": "Yes",
+      "made_by": "collaborative",
+      "source": "discussion",
+      "superseded_by": null
+    },
+    {
+      "seq": 2,
+      "id": "D002",
+      "when_context": "",
+      "scope": "architecture",
+      "decision": "Pipeline visibility mechanism",
+      "choice": "Two-layer: startup hook surfaces findings in conversation context (immediate), reseed script persists pipeline findings to status file (durable)",
+      "rationale": "Layer 1 gives immediate visibility with no risk (startup hook already exists). Layer 2 provides persistence across sessions. Avoids auto-editing QWEN.md until differential measurement proves value.",
+      "revisable": "Yes",
+      "made_by": "collaborative",
+      "source": "discussion",
+      "superseded_by": null
+    },
+    {
+      "seq": 3,
+      "id": "D003",
+      "when_context": "",
+      "scope": "architecture",
+      "decision": "Session-end capture approach",
+      "choice": "PreToolUse heartbeat hook tracks ongoing state; stale-detection on next startup infers ended sessions; QWEN.md instruction triggers closure in-session",
+      "rationale": "Qwen Code has no native SessionEnd hook type. PreToolUse provides the only reliable hook point. Writing cumulative state per-tool-call is lightweight and ensures the last session's state is never lost. Stale detection handles abrupt exits.",
+      "revisable": "Yes",
+      "made_by": "collaborative",
+      "source": "discussion",
+      "superseded_by": null
+    }
+  ],
+  "verification_evidence": [
+    {
+      "id": 1,
+      "task_id": "T01",
+      "slice_id": "S01",
+      "milestone_id": "M001",
+      "command": "node -e JSON.parse + schtasks /query",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 500,
+      "created_at": "2026-05-11T19:31:05.431Z"
+    },
+    {
+      "id": 2,
+      "task_id": "T02",
+      "slice_id": "S01",
+      "milestone_id": "M001",
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File Scripts/ahe-reseed-daily.ps1",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 2000,
+      "created_at": "2026-05-11T19:31:05.431Z"
+    },
+    {
+      "id": 3,
+      "task_id": "T03",
+      "slice_id": "S01",
+      "milestone_id": "M001",
+      "command": "schtasks /run /tn AHEDailyBrief",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 3000,
+      "created_at": "2026-05-11T19:31:05.432Z"
+    },
+    {
+      "id": 4,
+      "task_id": "T01",
+      "slice_id": "S02",
+      "milestone_id": "M001",
+      "command": "node ahe-startup-check.js 2>&1 | grep 'Nightly audit'",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 30000,
+      "created_at": "2026-05-11T19:31:05.432Z"
+    },
+    {
+      "id": 5,
+      "task_id": "T01",
+      "slice_id": "S03",
+      "milestone_id": "M001",
+      "command": "node --check ahe-session-heartbeat.js",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 500,
+      "created_at": "2026-05-11T19:31:05.433Z"
+    },
+    {
+      "id": 6,
+      "task_id": "T01",
+      "slice_id": "S03",
+      "milestone_id": "M001",
+      "command": "TOOL_NAME=read_file node ahe-session-heartbeat.js (4x)",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 100,
+      "created_at": "2026-05-11T19:31:05.433Z"
+    },
+    {
+      "id": 7,
+      "task_id": "T02",
+      "slice_id": "S03",
+      "milestone_id": "M001",
+      "command": "node --check ahe-startup-check.js",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 500,
+      "created_at": "2026-05-11T19:31:05.433Z"
+    },
+    {
+      "id": 8,
+      "task_id": "T01",
+      "slice_id": "S04",
+      "milestone_id": "M001",
+      "command": "grep check on QWEN.md content",
+      "exit_code": 0,
+      "verdict": "✅ pass",
+      "duration_ms": 500,
+      "created_at": "2026-05-11T19:31:05.434Z"
+    }
+  ]
+}

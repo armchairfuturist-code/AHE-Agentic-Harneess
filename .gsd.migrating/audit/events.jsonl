@@ -1,0 +1,1 @@
+{"version":"1","eventId":"ef898320-ecb7-422a-b0e5-847c4aaf43ad","traceId":"validate-milestone:M001","turnId":"M001:validate","category":"gate","type":"gate-run","ts":"2026-05-11T19:31:32.243Z","payload":{"gateId":"milestone-validation-gates","gateType":"verification","outcome":"pass","failureClass":"none","attempt":1,"maxAttempts":1,"retryable":false}}

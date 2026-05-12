@@ -316,11 +316,101 @@ function generateReport() {
   return lines.join('\n');
 }
 
+// ── Stale Session Detection ──
+
+function detectStaleSession() {
+  const heartbeatPath = path.join(STATUS_DIR, 'session-heartbeat.json');
+  const lockPath = path.join(STATUS_DIR, 'session-active.lock');
+  const manifestDir = path.join(AHE_DIR, 'session-manifests');
+
+  if (!fs.existsSync(heartbeatPath)) return false;
+
+  const hb = safeReadJSON(heartbeatPath);
+  if (!hb || !hb.last_tool_time) return false;
+
+  const now = new Date();
+  const lastTool = new Date(hb.last_tool_time);
+  const elapsed = (now - lastTool) / 1000 / 60; // minutes
+
+  if (elapsed < 60) return false; // session still active
+
+  // ── Duration: from session_start to last_tool_time ──
+  let duration_minutes = 1;
+  if (hb.session_start) {
+    const sessionStart = new Date(hb.session_start);
+    const lastToolDate = new Date(hb.last_tool_time);
+    duration_minutes = Math.round((lastToolDate - sessionStart) / 60000) || 1;
+  }
+
+  // ── Deduplication: skip if a manifest for today's date already exists ──
+  const todayStr = hb.date || today();
+  try {
+    if (fs.existsSync(manifestDir)) {
+      const existingFiles = fs.readdirSync(manifestDir);
+      const hasTodayManifest = existingFiles.some(function(f) {
+        return f.startsWith(todayStr + '-') && f.endsWith('.json');
+      });
+      if (hasTodayManifest) {
+        console.error('  [AHE] Manifest for ' + todayStr + ' already exists — skipping inferred write');
+        // Still clean up stale state so heartbeat doesn't linger
+        try { if (fs.existsSync(heartbeatPath)) fs.unlinkSync(heartbeatPath); } catch (_) {}
+        try { if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath); } catch (_) {}
+        return false;
+      }
+    }
+  } catch (_) { /* best-effort */ }
+
+  // ── Infer files_touched from tools_used if edit/write_file tools were used ──
+  const tools = hb.tools_used || {};
+  const editToolNames = ['edit', 'write_file', 'Write', 'Edit', 'edit_file', 'write'];
+  const filesTouched = Object.keys(tools).filter(function(t) {
+    return editToolNames.indexOf(t) !== -1;
+  });
+
+  // ── Model: try env var, then heartbeat field, default 'unknown' ──
+  const model = process.env.MODEL || hb.model || 'unknown';
+
+  const inferredManifest = {
+    session_id: hb.session_id || 'inferred-' + todayStr,
+    date: todayStr,
+    duration_minutes: duration_minutes,
+    project: 'unknown (inferred)',
+    model: model,
+    skills_used: [],
+    files_touched: filesTouched,
+    tools_used: Object.entries(tools).map(function(e) {
+      return { tool: e[0], count: e[1] };
+    }),
+    errors_hit: [],
+    patterns: [],
+    outcome: 'inferred',
+    summary: 'Session ended (inferred from stale heartbeat)',
+    recommendation: null,
+    inferred: true
+  };
+
+  try {
+    if (!fs.existsSync(manifestDir)) fs.mkdirSync(manifestDir, { recursive: true });
+    const manifestPath = path.join(manifestDir, todayStr + '-inferred.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(inferredManifest, null, 2), 'utf8');
+    console.error('  [AHE] Inferred ended session — wrote ' + manifestPath);
+  } catch (_) { /* best-effort */ }
+
+  // Clean up stale state: unlink both heartbeat and lock files
+  try { if (fs.existsSync(heartbeatPath)) fs.unlinkSync(heartbeatPath); } catch (_) {}
+  try { if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath); } catch (_) {}
+
+  return true;
+}
+
 // ── Main ──
 
 if (!isFirstSessionToday()) {
   process.exit(0); // Silent — already ran today
 }
+
+// Check for stale session before generating the report
+detectStaleSession();
 
 // Generate and output the report
 const report = generateReport();

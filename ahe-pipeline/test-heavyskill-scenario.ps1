@@ -215,6 +215,341 @@ if (Test-Path $consolidationFile) {
 }
 
 # ═════════════════════════════════════════════════════════════
+# TEST 7: HeavySkill Evaluator
+# ═════════════════════════════════════════════════════════════
+Write-Host "`n── Test Group 7: HeavySkill Evaluator ──" -ForegroundColor Cyan
+
+# Ensure module loaded with mock mode
+$env:AHE_HEAVYSKILL_MOCK = "1"
+. "$HeavySkillFile"
+
+# Test 7.1: Perfect gate output
+$perfectGate = @"
+## Summary
+KEEP - strong positive metrics across all dimensions
+
+## Rationale
+All KEEP criteria satisfied with high confidence
+
+## Confidence
+HIGH
+
+## Assumptions
+Model behavior remains consistent with observed trends
+"@
+$eval1 = Invoke-HeavySkillEval -HeavySkillOutput $perfectGate -Mode gate
+$ok1 = $eval1.ReasoningCoherence -ge 0.75 -and $eval1.VerdictAccuracy -eq 0.5 -and $eval1.SectionsPresent.Count -eq 4
+$detail1 = 'Coh=' + $eval1.ReasoningCoherence + ' Acc=' + $eval1.VerdictAccuracy + ' Sections=' + $eval1.SectionsPresent.Count
+Test-Result "Perfect gate output scores" $ok1 $detail1
+
+# Test 7.2: Plan output with action verbs
+$planOutput = @"
+## Summary
+Test the new module and Update the pipeline config
+
+## Rationale
+Concrete actions identified with clear deliverables
+
+## Confidence
+HIGH
+
+## Assumptions
+All dependencies are installed
+"@
+$eval2 = Invoke-HeavySkillEval -HeavySkillOutput $planOutput -Mode plan
+$det2 = 'Actionability=' + $eval2.PlanActionability
+Test-Result "Plan output actionability >= 0.4" ($eval2.PlanActionability -ge 0.4) $det2
+
+# Test 7.3: Missing sections
+$partialOutput = @"
+## Summary
+Quick analysis
+
+## Rationale
+Some reasoning
+
+## Confidence
+MEDIUM
+"@
+$eval3 = Invoke-HeavySkillEval -HeavySkillOutput $partialOutput -Mode gate
+$det3a = 'Coh=' + $eval3.ReasoningCoherence
+$det3b = 'Missing=' + ($eval3.SectionsMissing -join ',')
+Test-Result "Missing sections - coherence < 1.0" ($eval3.ReasoningCoherence -lt 1.0) $det3a
+Test-Result "Missing sections - contains 'Assumptions'" ($eval3.SectionsMissing -contains "Assumptions") $det3b
+
+# Test 7.4: Empty output
+$eval4 = Invoke-HeavySkillEval -HeavySkillOutput "" -Mode gate
+$det4a = 'Coh=' + $eval4.ReasoningCoherence
+$det4b = 'Missing=' + $eval4.SectionsMissing.Count
+Test-Result "Empty output - coherence 0" ($eval4.ReasoningCoherence -eq 0.0) $det4a
+Test-Result "Empty output - all sections missing" ($eval4.SectionsMissing.Count -eq 4) $det4b
+
+# Test 7.5: Malformed output (random text)
+$eval5 = Invoke-HeavySkillEval -HeavySkillOutput "some random text without section headers" -Mode gate
+$det5 = 'Coh=' + $eval5.ReasoningCoherence
+Test-Result "Malformed output - coherence 0" ($eval5.ReasoningCoherence -eq 0.0) $det5
+
+# Test 7.6: Baseline comparison - KEEP
+$keepGate = @"
+## Summary
+KEEP is the recommended action
+
+## Rationale
+Strong positive metrics
+
+## Confidence
+HIGH
+
+## Assumptions
+Trend continues
+"@
+$eval6 = Invoke-HeavySkillEval -HeavySkillOutput $keepGate -MockBaseline -Kappa 0.5 -Mode gate
+$lab6 = 'Kappa=0.5 baseline - verdict accuracy 1.0'
+$detail6 = 'Acc=' + $eval6.VerdictAccuracy + ' (expected KEEP)'
+Test-Result $lab6 ($eval6.VerdictAccuracy -eq 1.0) $detail6
+
+# Test 7.7: Baseline comparison - ROLLBACK
+$rollGate = @"
+## Summary
+ROLLBACK is necessary to restore stability
+
+## Rationale
+Sustained regression across metrics
+
+## Confidence
+HIGH
+
+## Assumptions
+Previous state remains viable
+"@
+$eval7 = Invoke-HeavySkillEval -HeavySkillOutput $rollGate -MockBaseline -Kappa -0.5 -Mode gate
+$lab7 = 'Kappa=-0.5 baseline - verdict accuracy 1.0'
+$detail7 = 'Acc=' + $eval7.VerdictAccuracy + ' (expected ROLLBACK)'
+Test-Result $lab7 ($eval7.VerdictAccuracy -eq 1.0) $detail7
+
+# Test 7.8: Baseline comparison - NO_CHANGE
+$flatGate = @"
+## Summary
+NO_CHANGE - metrics are stable
+
+## Rationale
+No significant movement in either direction
+
+## Confidence
+MEDIUM
+
+## Assumptions
+Current state is acceptable
+"@
+$eval8 = Invoke-HeavySkillEval -HeavySkillOutput $flatGate -MockBaseline -Kappa 0.05 -Mode gate
+$lab8 = 'Kappa=0.05 baseline - verdict accuracy 1.0'
+$detail8 = 'Acc=' + $eval8.VerdictAccuracy + ' (expected NO_CHANGE)'
+Test-Result $lab8 ($eval8.VerdictAccuracy -eq 1.0) $detail8
+
+# Test 7.9: -ReturnEval integration
+$gate9 = Invoke-HeavySkillGate -TractScores @{correctness=96;utility=80;reliability=90} -BenchmarkDelta 2.0 -Kappa 0.5 -ReturnEval
+$isArray = $gate9 -is [array]
+$has2Elements = $gate9.Count -eq 2
+$firstIsString = $gate9[0] -is [string]
+$secondIsHashtable = $gate9[1] -is [hashtable]
+$ok9 = $isArray -and $has2Elements -and $firstIsString -and $secondIsHashtable
+Test-Result "Gate -ReturnEval returns [output, eval]" $ok9 "Array=$isArray Count=2 Str=$firstIsString Ht=$secondIsHashtable"
+
+# Test 7.10: Research output coherence
+$researchOut = @"
+## Summary
+Multiple papers relevant to agentic harness optimization reviewed
+
+## Rationale
+Three papers provide actionable insights for the pipeline
+
+## Confidence
+MEDIUM
+
+## Assumptions
+Papers are representative of current SOTA
+"@
+$eval10 = Invoke-HeavySkillEval -HeavySkillOutput $researchOut -Mode research
+$lab10a = 'Research output - coherence >= 0.75'
+$lab10b = 'Research output - actionability 0'
+$det10a = 'Coh=' + $eval10.ReasoningCoherence
+$det10b = 'Act=' + $eval10.PlanActionability
+Test-Result $lab10a ($eval10.ReasoningCoherence -ge 0.75) $det10a
+Test-Result $lab10b ($eval10.PlanActionability -eq 0.0) $det10b
+
+Remove-Item Env:\AHE_HEAVYSKILL_MOCK -ErrorAction SilentlyContinue
+
+# ═════════════════════════════════════════════════════════════
+# TEST 8: HeavySkill Presets
+# ═════════════════════════════════════════════════════════════
+Write-Host "`n── Test Group 8: HeavySkill Presets ──" -ForegroundColor Cyan
+
+$env:AHE_HEAVYSKILL_MOCK = "1"
+. "$HeavySkillFile"
+
+# Test 8.1: Default preset (balanced)
+$r1 = Invoke-HeavySkillReasoning -Context "test" -OutputType "analysis"
+$ok1 = $r1 -match "## Summary" -and $r1 -match "## Rationale"
+Test-Result "Default preset = balanced" $ok1 "Summary+Rationale present"
+
+# Test 8.2: Quick preset
+$r2 = Invoke-HeavySkillReasoning -Context "test" -OutputType "analysis" -Preset quick
+Test-Result "Quick preset produces output" ($r2 -match "## Summary") "Has summary"
+
+# Test 8.3: Deep preset
+$r3 = Invoke-HeavySkillReasoning -Context "test" -OutputType "analysis" -Preset deep
+Test-Result "Deep preset produces output" ($r3 -match "## Summary") "Has summary"
+
+# Test 8.4: Env override
+$env:AHE_HEAVYSKILL_PRESET = "quick"
+$r4 = Invoke-HeavySkillReasoning -Context "test" -OutputType "analysis"
+Test-Result "Env override AHE_HEAVYSKILL_PRESET=quick" ($r4 -match "## Summary") "Has summary"
+Remove-Item Env:\AHE_HEAVYSKILL_PRESET -ErrorAction SilentlyContinue
+
+# Test 8.5: Auto-select from eval scores
+$autoHigh = Select-HeavySkillPreset -EvalScores @{VerdictAccuracy=1.0; ReasoningCoherence=1.0; PlanActionability=0.9}
+$autoLow  = Select-HeavySkillPreset -EvalScores @{VerdictAccuracy=0.0; ReasoningCoherence=0.3; PlanActionability=0.0}
+$autoMid  = Select-HeavySkillPreset -EvalScores @{VerdictAccuracy=0.5; ReasoningCoherence=0.75; PlanActionability=0.4}
+Test-Result "Auto-select: high -> quick" ($autoHigh -eq "quick") "Result=$autoHigh"
+Test-Result "Auto-select: low -> deep" ($autoLow -eq "deep") "Result=$autoLow"
+Test-Result "Auto-select: mid -> balanced" ($autoMid -eq "balanced") "Result=$autoMid"
+
+# Test 8.6: Resolve preset config
+$cfgQuick = Resolve-HeavySkillPreset -Preset quick
+$cfgDeep  = Resolve-HeavySkillPreset -Preset deep
+$cfgBal   = Resolve-HeavySkillPreset -Preset balanced
+Test-Result "Quick preset has 2 traces" ($cfgQuick.traces -eq 2) "traces=$($cfgQuick.traces)"
+Test-Result "Deep preset has 5 traces" ($cfgDeep.traces -eq 5) "traces=$($cfgDeep.traces)"
+Test-Result "Balanced preset has 3 traces" ($cfgBal.traces -eq 3) "traces=$($cfgBal.traces)"
+
+# Test 8.7: Gate with explicit preset
+$g1 = Invoke-HeavySkillGate -TractScores @{correctness=96;utility=80;reliability=90} -BenchmarkDelta 2.0 -Kappa 0.5 -Preset quick
+Test-Result "Gate with quick preset" ($g1 -match "KEEP") "Verdict=KEEP"
+
+# Test 8.8: Plan with deep preset
+$p1 = Invoke-HeavySkillPlan -Goal "test preset" -Preset deep
+Test-Result "Plan with deep preset" ($p1 -match "## Summary") "Has summary"
+
+Remove-Item Env:\AHE_HEAVYSKILL_MOCK -ErrorAction SilentlyContinue
+
+# ═════════════════════════════════════════════════════════════
+# TEST 9: Eval Trend & Gbrain
+# ═════════════════════════════════════════════════════════════
+Write-Host "`n── Test Group 9: Eval Trend & Gbrain ──" -ForegroundColor Cyan
+
+. "$HeavySkillFile"
+
+# Create temp eval dir with synthetic data
+$td = "$env:TEMP\ahe-scenario-trend-$(Get-Random)"
+New-Item -ItemType Directory -Path $td -Force | Out-Null
+1..10 | ForEach-Object {
+    $score = [Math]::Round(0.3 + ($_ * 0.07), 2)
+    $day = ([string]($_+1)).PadLeft(2,'0')
+    @{ timestamp = "2026-05-${day}T10:00:00"; heavySkillFunction = "Gate"; verdict = "KEEP"; outputHash = "h$_"; scores = @{ accuracy = $score; coherence = 0.8; actionability = 0.5 }; sectionsFound = @("S","R","C","A"); confidence = "HIGH"; rawLines = 11 } | ConvertTo-Json -Compress | Set-Content "$td\2026-05-$_-Gate.json" -Encoding UTF8
+}
+
+# Test 9.1: ReadEvalLogs
+$ent = Invoke-ReadEvalLogs -EvalDir $td
+Test-Result "ReadEvalLogs returns entries" ($ent.Count -eq 10) "Count=$($ent.Count)"
+
+# Test 9.2: ComputeEvalTrend
+$tr = Invoke-ComputeEvalTrend -EvalEntries $ent
+Test-Result "ComputeEvalTrend totalEvals" ($tr.totalEvals -eq 10) "total=$($tr.totalEvals)"
+Test-Result "ComputeEvalTrend avgAccuracy > 0" ($tr.avgAccuracy -gt 0) "avgAcc=$($tr.avgAccuracy)"
+
+# Test 9.3: Trend direction
+$impLab = 'Trend direction = improving'
+Test-Result $impLab ($tr.trend -eq "improving") "trend=$($tr.trend)"
+
+# Test 9.4: Write-GbrainEvalTrend local persistence
+$wr = Write-GbrainEvalTrend -EvalDir $td -SkipGbrain
+Test-Result "WriteGbrainEvalTrend local trend.json" (Test-Path "$td\trend.json") "Exists"
+
+# Test 9.5: trend.json structure
+$tjson = Get-Content "$td\trend.json" -Raw | ConvertFrom-Json
+Test-Result "trend.json has overall" ([bool]$tjson.overall) "present"
+Test-Result "trend.json has movingAverage" ([bool]$tjson.movingAverage) "present"
+
+# Test 9.6: Correlation
+$c1 = Invoke-CorrelateEvalAndBenchmark -EvalAccuracySeries @(0.5,0.6,0.7) -KappaSeries @(0.1,0.2,0.3)
+Test-Result "Correlation positive" ($c1.correlation -gt 0) "corr=$($c1.correlation)"
+
+$c3 = Invoke-CorrelateEvalAndBenchmark -EvalAccuracySeries @(0.5) -KappaSeries @(0.1)
+$c3Lab = 'Correlation insufficient data'
+Test-Result $c3Lab ($c3.note -eq "insufficient data") "note=$($c3.note)"
+
+# Cleanup
+Remove-Item $td -Recurse -Force -ErrorAction SilentlyContinue
+
+# ═════════════════════════════════════════════════════════════
+# TEST 10: HeavySkill Auto-Tune
+# ═════════════════════════════════════════════════════════════
+Write-Host "`n── Test Group 10: HeavySkill Auto-Tune ──" -ForegroundColor Cyan
+
+. "$HeavySkillFile"
+$td10 = "$env:TEMP\ahe-scenario-autotune-$(Get-Random)"
+New-Item -ItemType Directory -Path $td10 -Force | Out-Null
+
+# Write improving trend
+1..10 | ForEach-Object {
+    $score = [Math]::Round(0.3 + ($_ * 0.07), 2)
+    $day = ([string]($_+1)).PadLeft(2,'0')
+    @{ timestamp = "2026-05-${day}T10:00:00"; heavySkillFunction = "Gate"; verdict = "KEEP"; outputHash = "h$_"; scores = @{ accuracy = $score; coherence = 0.8; actionability = 0.5 }; sectionsFound = @("S","R","C","A"); confidence = "HIGH"; rawLines = 11 } | ConvertTo-Json -Compress | Set-Content "$td10\2026-05-$_-Gate.json" -Encoding UTF8
+}
+Write-GbrainEvalTrend -EvalDir $td10 -SkipGbrain | Out-Null
+
+# 10.1: Improving trend
+$a1 = Invoke-HeavySkillAutoTune -EvalDir $td10 -CurrentPreset balanced
+Test-Result "AutoTune: improving -> keep" ($a1.reason -eq "improving") "reason=$($a1.reason)"
+
+# 10.2: Write regression trend
+$td10b = "$env:TEMP\ahe-scenario-autotune-b-$(Get-Random)"
+New-Item -ItemType Directory -Path $td10b -Force | Out-Null
+1..10 | ForEach-Object {
+    $score = [Math]::Round(0.9 - ($_ * 0.08), 2)
+    $day = ([string]($_+1)).PadLeft(2,'0')
+    @{ timestamp = "2026-05-${day}T10:00:00"; heavySkillFunction = "Gate"; verdict = "KEEP"; outputHash = "h$_"; scores = @{ accuracy = $score; coherence = 0.8; actionability = 0.5 }; sectionsFound = @("S","R","C","A"); confidence = "HIGH"; rawLines = 11 } | ConvertTo-Json -Compress | Set-Content "$td10b\2026-05-$_-Gate.json" -Encoding UTF8
+}
+Write-GbrainEvalTrend -EvalDir $td10b -SkipGbrain | Out-Null
+
+$a2 = Invoke-HeavySkillAutoTune -EvalDir $td10b -CurrentPreset deep
+Test-Result "AutoTune: regression -> fallback" ($a2.recommended -eq "balanced" -and $a2.reason -eq "regression") "recommended=$($a2.recommended)"
+
+# 10.3: Plateau detection
+$td10c = "$env:TEMP\ahe-scenario-autotune-c-$(Get-Random)"
+New-Item -ItemType Directory -Path $td10c -Force | Out-Null
+1..10 | ForEach-Object {
+    $day = ([string]($_+1)).PadLeft(2,'0')
+    @{ timestamp = "2026-05-${day}T10:00:00"; heavySkillFunction = "Gate"; verdict = "KEEP"; outputHash = "h$_"; scores = @{ accuracy = 0.5; coherence = 0.8; actionability = 0.5 }; sectionsFound = @("S","R","C","A"); confidence = "MEDIUM"; rawLines = 11 } | ConvertTo-Json -Compress | Set-Content "$td10c\2026-05-$_-Gate.json" -Encoding UTF8
+}
+Write-GbrainEvalTrend -EvalDir $td10c -SkipGbrain | Out-Null
+
+$a3 = Invoke-HeavySkillAutoTune -EvalDir $td10c -CurrentPreset balanced
+Test-Result "AutoTune: plateau -> escalate" ($a3.reason -eq "plateau" -and $a3.action -eq "escalate") "action=$($a3.action)"
+
+# 10.4: No trend data
+$a4 = Invoke-HeavySkillAutoTune -EvalDir "$env:TEMP\ahe-scenario-autotune-empty" -CurrentPreset deep
+Test-Result "AutoTune: no data -> stays current" ($a4.recommended -eq "deep") "recommended=$($a4.recommended)"
+
+# 10.5: Env override
+$env:AHE_HEAVYSKILL_PRESET = "quick"
+$a5 = Invoke-HeavySkillAutoTune -EvalDir $td10 -CurrentPreset balanced
+Test-Result "AutoTune: env override" ($a5.recommended -eq "quick" -and $a5.reason -eq "env-override") "recommended=$($a5.recommended)"
+Remove-Item Env:\AHE_HEAVYSKILL_PRESET -ErrorAction SilentlyContinue
+
+# 10.6: AutoTune via Gate -ReturnEval
+$env:AHE_HEAVYSKILL_MOCK = "1"
+$gateWithAuto = Invoke-HeavySkillGate -TractScores @{correctness=96;utility=80;reliability=90} -BenchmarkDelta 2.0 -Kappa 0.5 -Preset balanced -ReturnEval
+$hasAutoTune = $gateWithAuto[1].PSObject.Properties.Name -contains 'autoTune'
+Test-Result "Gate -ReturnEval has autoTune field" $hasAutoTune "present=$hasAutoTune"
+Remove-Item Env:\AHE_HEAVYSKILL_MOCK -ErrorAction SilentlyContinue
+
+# Cleanup
+Remove-Item $td10 -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $td10b -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $td10c -Recurse -Force -ErrorAction SilentlyContinue
+
+# ═════════════════════════════════════════════════════════════
 # SUMMARY
 # ═════════════════════════════════════════════════════════════
 Write-Host ""

@@ -135,7 +135,7 @@ function checkBenchmark() {
 function checkDisk() {
   try {
     const { execSync } = require('child_process');
-    const result = execSync('powershell -Command "Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json"', { encoding: 'utf8', timeout: 5000 });
+    const result = execSync('pwsh -NoProfile -Command "Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json"', { encoding: 'utf8', timeout: 5000 });
     const data = JSON.parse(result);
     if (!data || !data.Free) return null;
     const free = data.Free;

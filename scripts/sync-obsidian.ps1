@@ -8,7 +8,7 @@
 .PARAMETER Force
     Skip confirmation prompts.
 #>
-param([switch]$DryRun, [switch]$Force)
+param([switch]$DryRun, [switch]$Force, [switch]$FromGbrain)
 
 $ErrorActionPreference = 'Continue'
 $VaultRoot = "C:\Users\Administrator\Documents\Obsidian Vault"
@@ -163,6 +163,76 @@ foreach ($a in $projectArtifacts) {
     if (-not (Test-Path $a.Path)) { continue }
     $label = Split-Path $a.Path -Leaf
     if (Copy-Artifact -Source $a.Path -Subdir $a.Sub -Label $label) { $artifactCount++ } else { $skippedCount++ }
+}
+
+# ============================================================================
+# PHASE 3 (OPTIONAL): Gbrain export -> Obsidian vault
+# ============================================================================
+if ($FromGbrain) {
+    Write-Host "`n=== Phase 3: Gbrain export -> Obsidian vault ===" -ForegroundColor Cyan
+    
+    try {
+        $exportDir = Join-Path $env:TEMP "gbrain-export-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+        
+        Write-Host "  Exporting gbrain pages..." -ForegroundColor Gray
+        $sshCmd = "export PATH=/home/alex/.bun/bin:`$PATH && mkdir -p /tmp/gbrain-vault-export && /home/alex/.bun/bin/gbrain export --dir /tmp/gbrain-vault-export 2>&1"
+        $exportResult = ssh alex@100.102.182.39 $sshCmd 2>&1
+        $exportExit = $LASTEXITCODE
+        
+        if ($exportExit -eq 0) {
+            # Copy exported files from remote to local vault
+            $remoteExportDir = "/tmp/gbrain-vault-export"
+            $scpCmd = "scp -r alex@100.102.182.39:$remoteExportDir/* $exportDir/"
+            $scpResult = Invoke-Expression $scpCmd 2>&1
+            
+            if ($LASTEXITCODE -eq 0) {
+                $copiedCount = 0
+                
+                # Copy AHE-specific pages to vault
+                $aheFiles = @(Get-ChildItem "$exportDir\*ahe*" -Recurse -ErrorAction SilentlyContinue)
+                $aheFiles += @(Get-ChildItem "$exportDir\*pipeline*" -Recurse -ErrorAction SilentlyContinue)
+                $aheFiles += @(Get-ChildItem "$exportDir\*session*" -Recurse -ErrorAction SilentlyContinue)
+                
+                $aheDest = "$VaultRoot\Research\AHE"
+                if (-not (Test-Path $aheDest)) { New-Item -ItemType Directory -Path $aheDest -Force | Out-Null }
+                
+                foreach ($f in $aheFiles) {
+                    $destFile = "$aheDest\$($f.Name)"
+                    if (-not (Test-Path $destFile)) {
+                        Copy-Item $f.FullName $destFile -Force
+                        $copiedCount++
+                    }
+                }
+                
+                # Also copy config pages
+                $configFiles = @(Get-ChildItem "$exportDir\*config*" -Recurse -ErrorAction SilentlyContinue)
+                $configDest = "$VaultRoot\Reference\AHE"
+                if (-not (Test-Path $configDest)) { New-Item -ItemType Directory -Path $configDest -Force | Out-Null }
+                foreach ($f in $configFiles) {
+                    $destFile = "$configDest\$($f.Name)"
+                    if (-not (Test-Path $destFile)) {
+                        Copy-Item $f.FullName $destFile -Force
+                        $copiedCount++
+                    }
+                }
+                
+                Log "Gbrain export: $copiedCount pages synced to vault" "Green"
+                
+                # Clean up remote export
+                ssh alex@100.102.182.39 "rm -rf /tmp/gbrain-vault-export" 2>$null
+            } else {
+                Log "Gbrain export: SCP failed - $scpResult" "Red"
+            }
+            
+            # Clean up local temp dir
+            Remove-Item $exportDir -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Log "Gbrain export: SSH export command failed (exit $exportExit)" "Yellow"
+        }
+    } catch {
+        Log "Gbrain export: $_" "Red"
+    }
 }
 
 # ============================================================================

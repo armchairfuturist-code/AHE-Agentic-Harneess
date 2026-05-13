@@ -111,33 +111,13 @@ function New-Verification {
 function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out-File $LogFile -Append; Write-Host "  $Msg" -ForegroundColor Gray }
 
 # ============================================================================
-# Gbrain Write Utility (SSH-based, graceful degradation)
-# ============================================================================
-function Write-GbrainPage {
-    param([string]$Slug, [string]$Content, [string]$Label = "")
-    try {
-        $tmpFile = Join-Path $env:TEMP "gbrain-write-$([System.IO.Path]::GetRandomFileName()).md"
-        $Content | Out-File -FilePath $tmpFile -Encoding utf8 -Force
-        $gbrainCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain put $Slug"
-        $result = Get-Content $tmpFile -Raw | ssh alex@100.102.182.39 $gbrainCmd 2>&1
-        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -eq 0) {
-            Log "GBRAIN OK: $Label ($Slug)"
-            return $true
-        } else {
-            $resultStr = ($result | Out-String).Trim()
-            Log "GBRAIN FAIL: $Label ($Slug) - exit $exitCode $resultStr"
-            return $false
-        }
-    } catch {
-        Log "GBRAIN ERROR: $Label ($Slug) - $_"
-        try { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue } catch {}
-        return $false
-    }
-}
+# Dot-source modules
+. "ahe-backup-rollback.ps1"
+. "ahe-candidate-eval.ps1"
+. "ahe-heavyskill.ps1"
 
-# Dot-source modules (HeavySkill replaces external Python Ralph Loop + sequential debugger).
+# Gbrain local adapter (replaces SSH-based gbrain)
+. ".\ahe-gbrain-migrate.ps1"
 # Level 1-3 simplification: parallel reasoning → summarization instead of 4-step sequential BoN.
 . "$ScriptsDir\ahe-backup-rollback.ps1"
 . "$ScriptsDir\ahe-candidate-eval.ps1"
@@ -164,7 +144,7 @@ function Invoke-McpVerification {
     if (-not (Test-Path $verifier)) { Log "verify-mcps.ps1 not found"; return $false }
     $passed = 0; $failed = 0; $servers = @()
     . $verifier
-    $mcpNames = @('filesystem','qwen-memory','github','brave-search','context7','chrome-devtools')
+    $mcpNames = @('filesystem','agentmemory','github','brave-search','context7','chrome-devtools')
     foreach ($s in $mcpNames) {
         if (Test-McpServer -Name $s -TimeoutSeconds 8) { $passed++ } else { $failed++ }
         Start-Sleep -Seconds 1
@@ -172,61 +152,6 @@ function Invoke-McpVerification {
     Log "MCP Verification: $passed passed, $failed failed"
     return ($failed -eq 0)
 }
-
-# ============================================================================
-# Gbrain Context Reader (pre-discover gbrain lookup)
-# ============================================================================
-function Invoke-GbrainContext {
-    <#
-    .SYNOPSIS
-        Query gbrain for historical pipeline cycles and build a list of already-tried candidates.
-    #>
-    param([ref]$KnownNames)
-    try {
-        $listCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain list --slug-prefix research/ahe/pipeline 2>/dev/null"
-        $pageList = ssh alex@100.102.182.39 $listCmd 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $pageList) {
-            Log "GBRAIN CONTEXT: no pipeline pages found (first run or gbrain unreachable)"
-            return $false
-        }
-        $cyclesFound = 0
-        $candidatesFound = 0
-        $pageLines = $pageList -split "`n"
-        foreach ($line in $pageLines) {
-            $slug = ($line -split "`t")[0]
-            if (-not $slug -or $slug -notmatch "pipeline") { continue }
-            $getCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain get $slug"
-            $pageContent = ssh alex@100.102.182.39 $getCmd 2>$null
-            if ($LASTEXITCODE -eq 0 -and $pageContent) {
-                $cyclesFound++
-                $lines = $pageContent -split "`n"
-                $inTable = $false
-                foreach ($pl in $lines) {
-                    if ($pl -match '^\| Name \| Score \|') { $inTable = $true; continue }
-                    if ($inTable -and $pl -match '^\| .+ \| .+ \|') {
-                        $parts = $pl -split '\|'
-                        if ($parts.Count -ge 2) {
-                            $cname = $parts[1].Trim()
-                            if ($cname -and $cname -ne '---') {
-                                $KnownNames.Value[$cname] = $true
-                                $candidatesFound++
-                            }
-                        }
-                    }
-                    if ($inTable -and $pl -match '^$') { $inTable = $false }
-                }
-            }
-        }
-        if ($cyclesFound -gt 0) {
-            Log "GBRAIN CONTEXT: $cyclesFound pipeline page(s), $candidatesFound known candidate(s) loaded"
-        } elseif ($pageList -and $pageList.Trim().Length -gt 0) {
-            Log "GBRAIN CONTEXT: $($pageLines.Count) page(s) listed but none matched pipeline cycles"
-        }
-        return ($cyclesFound -gt 0)
-    } catch {
-        Log "GBRAIN CONTEXT ERROR: $_"
-        return $false
-    }
 
 # ============================================================================
 # Attribution Tracker (per-candidate evaluation storage in gbrain)
@@ -281,8 +206,8 @@ $(foreach ($entry in $AdditionalEntries) {
 - **Best score:** $(if($manifest -and $manifest.best_score){$manifest.best_score}else{'N/A'})
 "@
         $attributionSlug = "research/ahe/attribution-$(Get-Date -Format 'yyyy-MM-dd')"
-        $null = Write-GbrainPage -Slug $attributionSlug -Content $attributionContent -Label "Attribution"
-        Log "ATTRIBUTION: $($Candidates.Count) candidate(s) tracked in gbrain ($attributionSlug)"
+        $null = Write-GbrainLocal -Slug $attributionSlug -Content $attributionContent -Label "Attribution"
+        Log "ATTRIBUTION: $($Candidates.Count) candidate(s) tracked in local gbrain ($attributionSlug)"
     } catch {
         Log "ATTRIBUTION ERROR: $_"
     }
@@ -293,22 +218,20 @@ $(foreach ($entry in $AdditionalEntries) {
 function Invoke-LearningsGate {
     param([array]$Candidates)
     try {
-        $listCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain list --slug-prefix research/ahe/attribution 2>/dev/null"
-        $pageList = ssh alex@100.102.182.39 $listCmd 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $pageList) {
-            Log "LEARNINGS GATE: No attribution history in gbrain (first run or unreachable)"
-            return
+        $attributionSlugs = List-GbrainLocal -SlugPrefix "research/ahe/attribution"
+        if ($attributionSlugs.Count -eq 0) {
+            Log "LEARNINGS GATE: No attribution history in local gbrain (first run)"
         }
-        $pageLines = $pageList -split "`n"
-        $totalCycles = $pageLines.Count
+        $totalCycles = $attributionSlugs.Count
         $readCount = 0
-        foreach ($line in $pageLines) {
+        }
+        $totalCycles = $attributionSlugs.Count
+        $readCount = 0
+        $readCount = 0
+        foreach ($slug in $attributionSlugs) {
             if ($readCount -ge 5) { break }
-            $slug = ($line -split "`t")[0]
-            if (-not $slug) { continue }
-            $getCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain get $slug 2>/dev/null"
-            $pageContent = ssh alex@100.102.182.39 $getCmd 2>$null
-            if ($LASTEXITCODE -eq 0 -and $pageContent) {
+            $pageContent = Read-GbrainLocal -Slug $slug
+            if ($pageContent) {
                 $readCount++
             }
         }
@@ -537,7 +460,7 @@ function Invoke-Compound {
     [void]$allCycles.Add($cycleLog)
     $allCycles | ConvertTo-Json -Compress | Set-Content $memoryFile
 
-    # Save to qwen-memory compatible format
+    # Save to memory format
     $memoryNote = @{
         type = "self-improve-cycle"
         date = $cycleLog.date
@@ -637,7 +560,7 @@ function Invoke-Compound {
     Write-Host "Learnings stored. $($allCycles.Count) total cycles recorded." -ForegroundColor Cyan
 
     # ============================================================================
-    # Gbrain writes (graceful degradation - never fails the pipeline)
+    # Local gbrain writes (graceful degradation - never fails the pipeline)
     # ============================================================================
     
     # 1. Pipeline cycle summary -> research/ahe/pipeline-<date>
@@ -680,7 +603,7 @@ $(foreach ($c in ($Candidates | Select-Object -First 3)) {
 - **Kappa:** $kappa
 "@
     }
-    $null = Write-GbrainPage -Slug $pipelineSlug -Content $pipelineContent -Label "Pipeline cycle"
+    $null = Write-GbrainLocal -Slug $pipelineSlug -Content $pipelineContent -Label "Pipeline cycle"
 
     # 2. Latest benchmark -> configs/ahe/benchmark
     $benchSlug = "configs/ahe/benchmark"
@@ -704,7 +627,7 @@ $(foreach ($c in ($Candidates | Select-Object -First 3)) {
 - **Kappa trend:** $kappa
 "@
     }
-    $null = Write-GbrainPage -Slug $benchSlug -Content $benchContent -Label "Benchmark"
+    $null = Write-GbrainLocal -Slug $benchSlug -Content $benchContent -Label "Benchmark"
 
     # 3. AHE Manifest summary -> configs/ahe/manifest
     $manifestSlug = "configs/ahe/manifest"
@@ -734,11 +657,11 @@ $(foreach ($comp in $manifest.components) {
 No components in manifest yet.
 "@
     }
-    $null = Write-GbrainPage -Slug $manifestSlug -Content $manifestContent -Label "Manifest"
+    $null = Write-GbrainLocal -Slug $manifestSlug -Content $manifestContent -Label "Manifest"
 
     # 4. Session manifest summaries -> learnings/ahe/session-<date>
     $sessionManifestDir = "$env:USERPROFILE\.ahe\session-manifests"
-    $sentinelFile = "$env:USERPROFILE\.autoresearch\.gbrain-session-sync.json"
+    $sentinelFile = "$env:USERPROFILE\.autoresearch\.gbrain-local-session-sync.json"
     $sentinel = @{}
     if (Test-Path $sentinelFile) {
         try { $sentinel = Get-Content $sentinelFile -Raw | ConvertFrom-Json } catch {}
@@ -773,7 +696,7 @@ $(if($sessionData.summary){"> **Summary:** $sessionData.summary"})
 
 ## Outcome: $(if($sessionData.outcome){$sessionData.outcome}else{'unknown'})
 "@
-            $ok = Write-GbrainPage -Slug $sessionSlug -Content $sessionContent -Label "Session $slugSuffix"
+            $ok = Write-GbrainLocal -Slug $sessionSlug -Content $sessionContent -Label "Session $slugSuffix"
             if ($ok) {
                 $syncedCount++
                 $sentinel | Add-Member -NotePropertyName $mf.Name -NotePropertyValue (Get-Date -Format "yyyy-MM-dd HH:mm") -Force
@@ -784,7 +707,7 @@ $(if($sessionData.summary){"> **Summary:** $sessionData.summary"})
     }
     if ($syncedCount -gt 0) {
         $sentinel | ConvertTo-Json -Compress | Set-Content $sentinelFile -Force
-        Log "GBRAIN: Synced $syncedCount session manifest(s) to gbrain"
+        Log "GBRAIN: Synced $syncedCount session manifest(s) to local storage"
     }
 
     # 5. Attribution tracking -> research/ahe/attribution-<date>
@@ -802,7 +725,7 @@ $(if($sessionData.summary){"> **Summary:** $sessionData.summary"})
     }
     Invoke-Attribution -Candidates $Candidates -BenchResult $benchResult -BenchmarkPassed $BenchmarkPassed -AdditionalEntries $evalEntries
 
-    Log "GBRAIN: Pipeline cycle gbrain writes complete"
+    Log "GBRAIN: Pipeline cycle local writes complete"
 }
 
     # 24h guard: skip if run within 24 hours unless forced
@@ -1038,9 +961,9 @@ if ((-not $Phase) -or $Phase -eq "research" -or $Research) {
 }
 
 if ((-not $Phase) -or $Phase -eq "discover") {
-    # Pre-discover: load gbrain context for candidate dedup
+    # Pre-discover: load local gbrain context for candidate dedup
     $gbrainKnownNames = @{}
-    $null = Invoke-GbrainContext -KnownNames ([ref]$gbrainKnownNames)
+    $null = Invoke-GbrainLocalContext -KnownNames ([ref]$gbrainKnownNames)
     $allCandidates = Invoke-Discovery -ExternalKnownNames $gbrainKnownNames
 
     # AHE: Create falsifiable predictions for each candidate
@@ -1239,7 +1162,7 @@ if ((-not $Phase) -or $Phase -eq "compound") {
     Invoke-Compound -Candidates $allCandidates -BenchmarkPassed $benchmarkPassed -GatesPassed $gatesPassed
 }
 
-# Phase 6: Consolidate — regenerate QWEN.md from gbrain manifest
+# Phase 6: Consolidate — regenerate QWEN.md from local manifest
 if ((-not $Phase) -or $Phase -eq "consolidate") {
     Write-Host "`n=== Phase 6: Consolidate ===" -ForegroundColor Cyan
     try {

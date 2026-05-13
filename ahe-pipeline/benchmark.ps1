@@ -83,7 +83,7 @@ function Invoke-SystemTests {
     Write-Host "  MCP Tests (weight x5, real ops):" -ForegroundColor Cyan
     $settings=Get-Content "$env:USERPROFILE\.qwen\settings.json" -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
     if(-not $settings -or -not $settings.mcpServers){Test-Fail "mcp.servers" "No MCP servers configured";return}
-    $expected=@("filesystem","qwen-memory","github","brave-search","context7","chrome-devtools")
+    $expected=@("filesystem","agentmemory","github","brave-search","context7","chrome-devtools")
     $found=0;foreach($name in $expected){if($settings.mcpServers.$name){$found++}}
     Test-Pass "mcp.configured" "$found/$($expected.Count) MCPs configured"
     if($found -eq 0){Test-Fail "mcp.coverage" "None found";return}

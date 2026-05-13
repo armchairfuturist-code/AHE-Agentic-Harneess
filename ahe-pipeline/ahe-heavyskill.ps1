@@ -781,7 +781,7 @@ function Invoke-CorrelateEvalAndBenchmark {
 
 <#
 .SYNOPSIS
-    Writes evaluation trend data to gbrain and local trend.json.
+    Writes evaluation trend data to local trend.json.
     Called from pipeline compound phase (or standalone for debugging).
 #>
 function Write-GbrainEvalTrend {
@@ -794,7 +794,7 @@ function Write-GbrainEvalTrend {
     $trend = Invoke-ComputeEvalTrend -EvalEntries $entries
     $date = Get-Date -Format "yyyy-MM-dd"
 
-    # Build gbrain content
+    # Build trend content
     $trendContent = @"
 # Reasoning Quality Trend — $date
 **Source:** AHE HeavySkill Evaluation (S01)
@@ -850,24 +850,11 @@ $(($entries | Group-Object function | ForEach-Object {
         Write-Warning "EvalTrend: Could not save local trend: $_"
     }
 
-    # Write to gbrain via SSH
+    # (gbrain SSH removed)
     if (-not $SkipGbrain) {
-        try {
-            $tempFile = [System.IO.Path]::GetTempFileName() + ".md"
-            $trendContent | Set-Content -Path $tempFile -Encoding UTF8 -Force
-            $slug = "learnings/ahe/reasoning-quality-$date"
-            $gbrainCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain put $slug"
-            Get-Content $tempFile -Raw | ssh alex@100.102.182.39 $gbrainCmd 2>&1 | Out-Null
-            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  [EvalTrend] Gbrain OK: $slug" -ForegroundColor Green
-            } else {
-                Write-Host "  [EvalTrend] Gbrain FAIL: $slug (exit $LASTEXITCODE)" -ForegroundColor Yellow
-            }
-        } catch {
-            Write-Host "  [EvalTrend] Gbrain SKIP: $_" -ForegroundColor Yellow
-            try { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue } catch {}
-        }
+        # Gbrain SSH write removed during migration
+        Write-Host "  [EvalTrend] Local trend saved" -ForegroundColor DarkYellow
+    }
     }
 
     return $trend

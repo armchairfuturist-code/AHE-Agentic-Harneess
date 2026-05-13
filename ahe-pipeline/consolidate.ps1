@@ -1,6 +1,6 @@
-# AHE Consolidate — Read gbrain manifest, regenerate QWEN.md 
+# AHE Consolidate — Read local manifest, regenerate QWEN.md 
 # Usage: pwsh -File ahe-pipeline/consolidate.ps1
-# Depends on: SSH access to gbrain (alex@100.102.182.39), existing QWEN.md at ~/.qwen/
+# Depends on: local gbrain storage at ~/.autoresearch/gbrain/, existing QWEN.md at ~/.qwen/
 
 param([switch]$DryRun, [switch]$Force)
 
@@ -12,35 +12,25 @@ if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Forc
 function Log { param($Msg) $ts = Get-Date -Format "HH:mm:ss"; "$ts | $Msg" | Out-File $LogFile -Append; Write-Host "  $Msg" -ForegroundColor Gray }
 
 function Read-GbrainPage {
-    param([string]$Slug)
-    try {
-        $sshCmd = "export PATH=/home/alex/.bun/bin:`$PATH && /home/alex/.bun/bin/gbrain get $Slug"
-        $result = ssh alex@100.102.182.39 $sshCmd 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $result
-        }
-        return $null
-    } catch {
-        Log "ERROR reading gbrain page ${Slug}: $_"
-        return $null
-    }
+    # REMOVED: SSH-based gbrain read. Using local adapter.
+    return Read-GbrainLocal -Slug $Slug
 }
 
 Write-Host "=== AHE Consolidate ===" -ForegroundColor Magenta
 Log "Starting consolidation"
 
-# 1. Read gbrain pages
-Write-Host "Reading gbrain manifest..." -ForegroundColor Cyan
-$manifestPage = Read-GbrainPage -Slug "configs/ahe/manifest"
+# 1. Read local gbrain storage
+Write-Host "Reading local gbrain manifest..." -ForegroundColor Cyan
+$manifestPage = Read-GbrainLocal -Slug "configs/ahe/manifest"
 if (-not $manifestPage) {
-    Log "ERROR: Cannot read configs/ahe/manifest from gbrain (SSH unreachable or page missing)"
-    Write-Host "  FAIL: gbrain unreachable. Exiting without changes." -ForegroundColor Red
+    Log "ERROR: Cannot read configs/ahe/manifest from local gbrain"
+    Write-Host "  FAIL: gbrain data missing. Exiting without changes." -ForegroundColor Red
     exit 1
 }
 
-$benchmarkPage = Read-GbrainPage -Slug "configs/ahe/benchmark"
+$benchmarkPage = Read-GbrainLocal -Slug "configs/ahe/benchmark"
 if (-not $benchmarkPage) {
-    Log "WARNING: configs/ahe/benchmark not found in gbrain (okay — first run)"
+    Log "WARNING: configs/ahe/benchmark not found in local gbrain (okay — first run)"
 }
 
 Log "Manifest page read: $($manifestPage.Length) chars"
@@ -105,7 +95,7 @@ AHE is an autonomous intelligence layer that sits on top of Qwen Code, turning i
 
 **Latest benchmark:** $benchmarkScore/100 (last cycle: $(if($lastCycle -ne "N/A"){$lastCycle}else{'unknown'}))
 
-### Components (curated from gbrain manifest)
+### Components (curated from local gbrain manifest)
 
 The following AHE components are active and managed:
 
@@ -114,9 +104,9 @@ The following AHE components are active and managed:
 | ahe-startup-check.js | hook | active | Daily health report on session start, stale session detection |
 | ahe-session-heartbeat.js | hook | active | PreToolUse tool tracking with type categorization |
 | ahe-closure | skill | active | Session manifest creation at session end |
-| sync-obsidian.ps1 | script | active | Obsidian vault sync from gbrain/manual |
+| sync-obsidian.ps1 | script | active | Obsidian vault sync from local storage/manual |
 | pipeline.ps1 | pipeline | active | Full self-improvement pipeline (discover/benchmark/gate/compound) |
-| consolidate.ps1 | pipeline | active | QWEN.md regeneration from gbrain manifest |
+| consolidate.ps1 | pipeline | active | QWEN.md regeneration from local manifest |
 "@
 
 # 6. Write new QWEN.md

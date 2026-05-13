@@ -166,23 +166,23 @@ foreach ($a in $projectArtifacts) {
 }
 
 # ============================================================================
-# PHASE 3 (OPTIONAL): Gbrain export -> Obsidian vault
+# PHASE 3 (OPTIONAL): Local gbrain export -> Obsidian vault
 # ============================================================================
 if ($FromGbrain) {
-    Write-Host "`n=== Phase 3: Gbrain export -> Obsidian vault ===" -ForegroundColor Cyan
+    Write-Host "`n=== Phase 3: Local gbrain export -> Obsidian vault ===" -ForegroundColor Cyan
     
     try {
         $exportDir = Join-Path $env:TEMP "gbrain-export-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
         New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
         
-        Write-Host "  Exporting gbrain pages..." -ForegroundColor Gray
-        $sshCmd = "export PATH=/home/alex/.bun/bin:`$PATH && mkdir -p /tmp/gbrain-vault-export && /home/alex/.bun/bin/gbrain export --dir /tmp/gbrain-vault-export 2>&1"
-        $exportResult = ssh alex@100.102.182.39 $sshCmd 2>&1
+        Write-Host "  Exporting local gbrain pages..." -ForegroundColor Gray
+        # gbrain SSH export removed - using local gbrain storage
+        # Using local gbrain storage
         $exportExit = $LASTEXITCODE
         
         if ($exportExit -eq 0) {
             # Copy exported files from remote to local vault
-            $remoteExportDir = "/tmp/gbrain-vault-export"
+            $localGbrainDir = $GbrainDir
             $scpCmd = "scp -r alex@100.102.182.39:$remoteExportDir/* $exportDir/"
             $scpResult = Invoke-Expression $scpCmd 2>&1
             
@@ -217,21 +217,21 @@ if ($FromGbrain) {
                     }
                 }
                 
-                Log "Gbrain export: $copiedCount pages synced to vault" "Green"
+                Log "Local gbrain export: $copiedCount pages synced to vault" "Green"
                 
                 # Clean up remote export
-                ssh alex@100.102.182.39 "rm -rf /tmp/gbrain-vault-export" 2>$null
+                # (SSH cleanup removed)
             } else {
-                Log "Gbrain export: SCP failed - $scpResult" "Red"
+                Log "Local gbrain export: SCP failed - $scpResult" "Red"
             }
             
             # Clean up local temp dir
             Remove-Item $exportDir -Recurse -Force -ErrorAction SilentlyContinue
         } else {
-            Log "Gbrain export: SSH export command failed (exit $exportExit)" "Yellow"
+            Log "Local gbrain export: SSH export command failed (exit $exportExit)" "Yellow"
         }
     } catch {
-        Log "Gbrain export: $_" "Red"
+        Log "Local gbrain export: $_" "Red"
     }
 }
 

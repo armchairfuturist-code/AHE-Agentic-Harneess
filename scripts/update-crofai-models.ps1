@@ -260,6 +260,42 @@ try {
     $json | Set-Content $SettingsPath -Encoding UTF8 -NoNewline
     Write-Color "✓ settings.json updated" -Color $Colors.Success
 
+    # --- GSD2 Model Update ---
+    # Also update GSD2/pi's models.json with the same model list
+    $gsdModelsPath = "$env:USERPROFILE\.gsd\agent\models.json"
+    Write-Color "  Updating GSD2 models..." -Color $Colors.Info
+    try {
+        $gsdModels = @()
+        foreach ($m in $newModels) {
+            $baseId = $m.id
+            if ($baseId -match '^(.*)-crofai$') { $baseId = $Matches[1] }
+            $cleanName = $m.name
+            if ($cleanName -match '^CrofAI: (.*)$') { $cleanName = $Matches[1] }
+            $reasoning = ($m.generationConfig -and $m.generationConfig.extraBody -and ($m.generationConfig.extraBody.enable_thinking -or $m.generationConfig.extraBody.reasoning_effort))
+            $ctx = 131072
+            if ($m.generationConfig -and $m.generationConfig.contextWindowSize) { $ctx = $m.generationConfig.contextWindowSize }
+            $mt = 8192
+            if ($m.generationConfig -and $m.generationConfig.samplingParams -and $m.generationConfig.samplingParams.max_tokens) { $mt = $m.generationConfig.samplingParams.max_tokens }
+            $gsdModels += [PSCustomObject]@{
+                id = $baseId
+                name = $cleanName
+                reasoning = $reasoning
+                contextWindow = $ctx
+                maxTokens = $mt
+            }
+        }
+        if (Test-Path $gsdModelsPath) {
+            $gsdConfig = Get-Content $gsdModelsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $gsdConfig.providers.crofai.models = $gsdModels
+            $gsdConfig | ConvertTo-Json -Depth 10 -Compress | Set-Content $gsdModelsPath -Encoding UTF8 -NoNewline
+            Write-Color "  GSD2: $($gsdModels.Count) models updated" -Color $Colors.Success
+        } else {
+            Write-Color "  GSD2: models.json not found at $gsdModelsPath" -Color $Colors.Warning
+        }
+    } catch {
+        Write-Color "  GSD2 update skipped: $_" -Color $Colors.Warning
+    }
+
     if ($removed.Count -gt 0) {
         Write-Color "  Removed $($removed.Count) stale models" -Color $Colors.Warning
     }

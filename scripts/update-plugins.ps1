@@ -1514,6 +1514,169 @@ function Update-NotebookLmMcp {
     }
 }
 
+# =============================================================================
+#  GIT-BASED REPOS (gstack, geo-seo-claude, last30days-skill)
+# =============================================================================
+
+function Get-GitCurrentVersion {
+    param([string]$RepoPath)
+    try {
+        Push-Location $RepoPath
+        $tag = git describe --tags --abbrev=0 2>$null
+        if (-not $tag) { $tag = git rev-parse --short HEAD 2>$null }
+        Pop-Location
+        if ($tag) { return $tag.Trim() }
+    } catch {
+        try { Pop-Location } catch {}
+    }
+    return "unknown"
+}
+
+function Get-GitLatestVersion {
+    param([string]$RepoPath, [string]$RemoteName = "origin")
+    try {
+        Push-Location $RepoPath
+        git fetch --tags --quiet 2>$null
+        $tag = git describe --tags --abbrev=0 "$RemoteName" 2>$null
+        if (-not $tag) {
+            $tag = git rev-parse --short "$RemoteName/HEAD" 2>$null
+        }
+        Pop-Location
+        if ($tag) { return $tag.Trim() }
+    } catch {
+        try { Pop-Location } catch {}
+    }
+    return $null
+}
+
+function Update-GitRepo {
+    param(
+        [string]$Name,
+        [string]$RepoPath,
+        [string]$RemoteName,
+        [string]$DisplayLabel,
+        [string]$RemoteUrl,
+        [int]$Step,
+        [int]$TotalSteps,
+        [bool]$CheckOnly,
+        [bool]$Force
+    )
+
+    Write-Step "[$Step/$TotalSteps] $DisplayLabel"
+
+    if (-not (Test-Path $RepoPath)) {
+        Write-Color "  Path not found: $RepoPath" -Color $Colors.Error
+
+        if ($RemoteUrl -and -not $CheckOnly) {
+            Write-Host "  Running: git clone $RemoteUrl"
+            try {
+                $parent = Split-Path $RepoPath -Parent
+                if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                Push-Location $parent
+                git clone $RemoteUrl (Split-Path $RepoPath -Leaf) 2>&1
+                $exit = $LASTEXITCODE
+                Pop-Location
+                if ($exit -eq 0) {
+                    $ver = Get-GitCurrentVersion -RepoPath $RepoPath
+                    Write-Result "Cloned $Name at $ver" $true
+                    Write-Log "$Name cloned at $ver"
+                } else {
+                    Write-Result "git clone failed (exit $exit)" $false
+                }
+            } catch {
+                try { Pop-Location } catch {}
+                Write-Result "Exception cloning $Name : $_" $false
+            }
+        } else {
+            Write-Skip "Repository not found — no clone URL provided"
+        }
+        return
+    }
+
+    # Check if it's actually a git repo
+    if (-not (Test-Path "$RepoPath\.git")) {
+        Write-Color "  Not a git repository: $RepoPath" -Color $Colors.Error
+        return
+    }
+
+    $currentVer = Get-GitCurrentVersion -RepoPath $RepoPath
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   $RemoteUrl"
+
+    # If no remote name provided, detect
+    if (-not $RemoteName) {
+        try {
+            Push-Location $RepoPath
+            $RemoteName = (git remote 2>$null | Select-Object -First 1)
+            Pop-Location
+        } catch {
+            try { Pop-Location } catch {}
+        }
+    }
+
+    if (-not $RemoteName) {
+        Write-Color "  No git remote configured" -Color $Colors.Error
+        return
+    }
+
+    try {
+        Push-Location $RepoPath
+        Write-Host "  Checking: git fetch $RemoteName ..."
+        git fetch --tags --quiet $RemoteName 2>&1 | Out-Null
+        Pop-Location
+    } catch {
+        try { Pop-Location } catch {}
+        Write-Result "Could not fetch $RemoteName for $Name" $false
+        return
+    }
+
+    $latestVer = Get-GitLatestVersion -RepoPath $RepoPath -RemoteName $RemoteName
+    if ($latestVer) { Write-Host "  Latest:   $latestVer" }
+    
+    # Determine if update needed
+    $needsUpdate = $Force
+    if ($currentVer -and $latestVer -and $currentVer -ne $latestVer) {
+        $needsUpdate = $true
+    }
+
+    if ($needsUpdate) {
+        if ($currentVer -and $latestVer -and $currentVer -ne $latestVer) {
+            Write-Color "  > Update available: $currentVer -> $latestVer" -Color $Colors.Warning
+        } elseif ($Force) {
+            Write-Color "  > Force re-pull at $currentVer" -Color $Colors.Warning
+        }
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "$Name $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Push-Location $RepoPath
+            $branch = git rev-parse --abbrev-ref HEAD 2>$null
+            Write-Host "  Running: git pull $RemoteName $branch"
+            $output = git pull $RemoteName $branch 2>&1
+            $exit = $LASTEXITCODE
+            Pop-Location
+            if ($exit -eq 0) {
+                $newVer = Get-GitCurrentVersion -RepoPath $RepoPath
+                Write-Result "Updated to $newVer" $true
+                Write-Log "$Name updated: $currentVer -> $newVer"
+            } else {
+                Write-Result "git pull failed (exit $exit): $($output -join '; ')" $false
+                Write-Log "$Name update FAILED: git pull exit $exit" -Level "ERROR"
+            }
+        } catch {
+            try { Pop-Location } catch {}
+            Write-Result "Exception during $Name update: $_" $false
+            Write-Log "$Name update exception: $_" -Level "ERROR"
+        }
+    } else {
+        Write-Result "Already up to date at $currentVer" $true
+    }
+}
+
 try {
     # Determine which items to process
     $itemsToProcess = @()
@@ -1534,13 +1697,16 @@ try {
             "context7-mcp"      { $itemsToProcess = @("context7-mcp") }
             "chrome-devtools-mcp" { $itemsToProcess = @("chrome-devtools-mcp") }
             "notebooklm-mcp"    { $itemsToProcess = @("notebooklm-mcp") }
+            "gstack"            { $itemsToProcess = @("gstack") }
+            "geo-seo"           { $itemsToProcess = @("geo-seo") }
+            "last30days"        { $itemsToProcess = @("last30days") }
             default {
-                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp, chrome-devtools-mcp, notebooklm-mcp" -Color $Colors.Error
+                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp, chrome-devtools-mcp, notebooklm-mcp, gstack, geo-seo, last30days" -Color $Colors.Error
                 exit 1
             }
         }
     } else {
-        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", "squeez", "deepseek-tui", "pi-acp", "context7-mcp", "chrome-devtools-mcp", "notebooklm-mcp")
+        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", "squeez", "deepseek-tui", "pi-acp", "context7-mcp", "chrome-devtools-mcp", "notebooklm-mcp", "gstack", "geo-seo", "last30days")
     }
 
     $hasUpdates = $false
@@ -1589,23 +1755,37 @@ try {
     }
 
     if ($itemsToProcess -contains "deepseek-tui") {
-        Update-SimpleNpmPackage -Name "Deepseek TUI" -Package "deepseek-tui" -DisplayLabel "Deepseek TUI CLI" -Step 10 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-DeepseekTuiCurrentVersion}
+        Update-SimpleNpmPackage -Name "Deepseek TUI" -Package "deepseek-tui" -DisplayLabel "Deepseek TUI CLI" -Step 10 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-DeepseekTuiCurrentVersion}
     }
 
     if ($itemsToProcess -contains "pi-acp") {
-        Update-SimpleNpmPackage -Name "pi ACP" -Package "pi-acp" -DisplayLabel "pi ACP SDK" -Step 11 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-PiAcpCurrentVersion}
+        Update-SimpleNpmPackage -Name "pi ACP" -Package "pi-acp" -DisplayLabel "pi ACP SDK" -Step 11 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-PiAcpCurrentVersion}
     }
 
     if ($itemsToProcess -contains "context7-mcp") {
-        Update-LocalMcpPackage -Name "Context7 MCP" -PackageName "@upstash/context7-mcp" -DisplayLabel "Context7 MCP Server" -Step 12 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "@upstash/context7-mcp" }
+        Update-LocalMcpPackage -Name "Context7 MCP" -PackageName "@upstash/context7-mcp" -DisplayLabel "Context7 MCP Server" -Step 12 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "@upstash/context7-mcp" }
     }
 
     if ($itemsToProcess -contains "chrome-devtools-mcp") {
-        Update-LocalMcpPackage -Name "Chrome DevTools MCP" -PackageName "chrome-devtools-mcp" -DisplayLabel "Chrome DevTools MCP" -Step 13 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "chrome-devtools-mcp" }
+        Update-LocalMcpPackage -Name "Chrome DevTools MCP" -PackageName "chrome-devtools-mcp" -DisplayLabel "Chrome DevTools MCP" -Step 13 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "chrome-devtools-mcp" }
     }
 
     if ($itemsToProcess -contains "notebooklm-mcp") {
         Update-NotebookLmMcp -CheckOnly $CheckOnly -Force $Force
+    }
+
+    # ── Git-based repos ──
+
+    if ($itemsToProcess -contains "gstack") {
+        Update-GitRepo -Name "gstack" -RepoPath "C:\Users\Administrator\plugins\gstack" -RemoteName "origin" -RemoteUrl "https://github.com/garrytan/gstack.git" -DisplayLabel "Gstack (Garry Tan)" -Step 15 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
+    }
+
+    if ($itemsToProcess -contains "geo-seo") {
+        Update-GitRepo -Name "geo-seo-claude" -RepoPath "C:\Users\Administrator\Documents\Projects\geo-seo-claude" -RemoteName "origin" -RemoteUrl "https://github.com/zubair-trabzada/geo-seo-claude.git" -DisplayLabel "Geo-SEO Claude Skills" -Step 16 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
+    }
+
+    if ($itemsToProcess -contains "last30days") {
+        Update-GitRepo -Name "last30days-skill" -RepoPath "C:\Users\Administrator\.qwen\skills\last30days" -RemoteName "origin" -RemoteUrl "https://github.com/mvanhorn/last30days-skill.git" -DisplayLabel "Last30Days Skill (mvanhorn)" -Step 17 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
     }
 
     # Summary

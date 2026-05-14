@@ -8,7 +8,7 @@
 #   .\update-plugins.ps1 -Item qwen   - Only update a specific item
 #   .\update-plugins.ps1 -ListItems   - Show version table for all tools
 #
-# Items: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext,
+# Items: qwen, gsd, ce, rooted-leader, rtk, context-mode,
 #        agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp,
 #        chrome-devtools-mcp, notebooklm-mcp
 
@@ -139,7 +139,6 @@ function Show-Help {
     Write-Host "  rooted-leader     Rooted Leader Site (Firebase project)"
     Write-Host "  rtk               RTK Token Saver CLI (GitHub release)"
     Write-Host "  context-mode      Context-Mode MCP server (npm package)"
-    Write-Host "  autocontext       AutoContext Python package (pip)"
     Write-Host "  agent-browser     Agent Browser CLI (npm package)"
     Write-Host "  squeez            Squeez token compressor (GitHub binary)"
     Write-Host "  deepseek-tui      Deepseek TUI CLI (npm global package)"
@@ -196,7 +195,6 @@ function Show-ItemList {
     } catch {}
 
     try {
-        $av = pip show autocontext 2>$null | Out-String
         if ($av -match 'Version:\s+(\S+)') { $acVer = $Matches[1] }
     } catch {}
 
@@ -277,10 +275,7 @@ function Show-ItemList {
     Write-Host "    Source:  npm package context-mode"
     Write-Host "    Update:  npm install -g context-mode@latest"
     Write-Host ""
-    Write-Color "  autocontext     AutoContext Python package" -Color $Colors.Info
     Write-Host "    Version: $acVer (installed)"
-    Write-Host "    Source:  pip / greyhaven-ai/autocontext"
-    Write-Host "    Update:  pip install -U autocontext"
     Write-Host ""
     Write-Color "  agent-browser   Agent Browser CLI" -Color $Colors.Info
     Write-Host "    Version: $abVer (installed)"
@@ -1045,82 +1040,6 @@ function Update-ContextMode {
     }
 }
 
-# =============================================================================
-#  AUTOCONTEXT UPDATE
-# =============================================================================
-
-function Get-AutoContextCurrentVersion {
-    try {
-        $av = pip show autocontext 2>$null | Out-String
-        if ($av -match 'Version: (\S+)') { return $Matches[1] }
-    } catch {}
-    return "unknown"
-}
-
-function Get-AutoContextLatestVersion {
-    try {
-        $url = "https://pypi.org/pypi/autocontext/json"
-        $response = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
-        return $response.info.version
-    } catch { return $null }
-}
-
-function Update-AutoContext {
-    param([bool]$CheckOnly, [bool]$Force)
-
-    Write-Step "[7/14] AutoContext (Python)"
-
-    $currentVer = Get-AutoContextCurrentVersion
-    Write-Host "  Current:  $currentVer"
-    Write-Host "  Source:   pip / greyhaven-ai/autocontext"
-
-    $latestVer = Get-AutoContextLatestVersion
-    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
-
-    if (-not $latestVer) {
-        Write-Result "Could not fetch latest autocontext version from PyPI" $false
-        return
-    }
-
-    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
-
-    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
-        $action = if ($status -eq "outdated") {
-            "Update available: $currentVer -> $latestVer"
-        } else {
-            "Already current at $currentVer (forced reinstall)"
-        }
-        Write-Color "  > $action" -Color $Colors.Warning
-
-        if ($CheckOnly) {
-            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
-            Write-Log "AutoContext $currentVer -> $latestVer (would update, skipped -CheckOnly)"
-            return
-        }
-
-        try {
-            Write-Host "  Running: pip install -U autocontext"
-            $output = pip install -U autocontext 2>&1
-            $exit = $LASTEXITCODE
-            if ($exit -eq 0) {
-                $newVer = Get-AutoContextCurrentVersion
-                Write-Result "Updated to $newVer" $true
-                Write-Log "AutoContext updated: $currentVer -> $newVer"
-                Write-Color "  !! Restart Qwen Code to load updated Python module" -Color $Colors.Warning
-            } else {
-                Write-Result "pip install failed (exit $exit)" $false
-                Write-Log "AutoContext update FAILED: pip exit $exit" -Level "ERROR"
-            }
-        } catch {
-            Write-Result "Exception during autocontext update: $_" $false
-            Write-Log "AutoContext update exception: $_" -Level "ERROR"
-        }
-    } elseif ($status -eq "current") {
-        Write-Result "Already up to date at v$currentVer" $true
-    } else {
-        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
-    }
-}
 
 # =============================================================================
 #  AGENT-BROWSER UPDATE
@@ -1146,7 +1065,7 @@ function Get-AgentBrowserLatestVersion {
 function Update-AgentBrowser {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[8/14] Agent Browser CLI"
+    Write-Step "[8/16] Agent Browser CLI"
 
     $currentVer = Get-AgentBrowserCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -1224,7 +1143,7 @@ function Get-SqueezLatestVersion {
 function Update-Squeez {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[9/14] Squeez Token Compressor"
+    Write-Step "[9/16] Squeez Token Compressor"
 
     $currentVer = Get-SqueezCurrentVersion
     Write-Host "  Current:  $currentVer (binary)"
@@ -1460,7 +1379,7 @@ function Get-NotebookLmLatestVersion {
 function Update-NotebookLmMcp {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[14/14] NotebookLM MCP"
+    Write-Step "[14/16] NotebookLM MCP"
 
     $currentVer = Get-NotebookLmCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -1689,7 +1608,6 @@ try {
             "rooted-leader"     { $itemsToProcess = @("rooted-leader") }
             "rtk"               { $itemsToProcess = @("rtk") }
             "context-mode"      { $itemsToProcess = @("context-mode") }
-            "autocontext"       { $itemsToProcess = @("autocontext") }
             "agent-browser"     { $itemsToProcess = @("agent-browser") }
             "squeez"            { $itemsToProcess = @("squeez") }
             "deepseek-tui"      { $itemsToProcess = @("deepseek-tui") }
@@ -1701,12 +1619,12 @@ try {
             "geo-seo"           { $itemsToProcess = @("geo-seo") }
             "last30days"        { $itemsToProcess = @("last30days") }
             default {
-                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp, chrome-devtools-mcp, notebooklm-mcp, gstack, geo-seo, last30days" -Color $Colors.Error
+                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp, chrome-devtools-mcp, notebooklm-mcp, gstack, geo-seo, last30days" -Color $Colors.Error
                 exit 1
             }
         }
     } else {
-        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", "squeez", "deepseek-tui", "pi-acp", "context7-mcp", "chrome-devtools-mcp", "notebooklm-mcp", "gstack", "geo-seo", "last30days")
+        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "agent-browser", "squeez", "deepseek-tui", "pi-acp", "context7-mcp", "chrome-devtools-mcp", "notebooklm-mcp", "gstack", "geo-seo", "last30days")
     }
 
     $hasUpdates = $false
@@ -1740,9 +1658,6 @@ try {
         if (-not $CheckOnly -and (Get-ContextModeCurrentVersion) -ne (Get-ContextModeLatestVersion)) { $hasUpdates = $true }
     }
 
-    if ($itemsToProcess -contains "autocontext") {
-        Update-AutoContext -CheckOnly $CheckOnly -Force $Force
-        if (-not $CheckOnly -and (Get-AutoContextCurrentVersion) -ne (Get-AutoContextLatestVersion)) { $hasUpdates = $true }
     }
 
     if ($itemsToProcess -contains "agent-browser") {
@@ -1755,19 +1670,19 @@ try {
     }
 
     if ($itemsToProcess -contains "deepseek-tui") {
-        Update-SimpleNpmPackage -Name "Deepseek TUI" -Package "deepseek-tui" -DisplayLabel "Deepseek TUI CLI" -Step 10 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-DeepseekTuiCurrentVersion}
+        Update-SimpleNpmPackage -Name "Deepseek TUI" -Package "deepseek-tui" -DisplayLabel "Deepseek TUI CLI" -Step 9 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-DeepseekTuiCurrentVersion}
     }
 
     if ($itemsToProcess -contains "pi-acp") {
-        Update-SimpleNpmPackage -Name "pi ACP" -Package "pi-acp" -DisplayLabel "pi ACP SDK" -Step 11 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-PiAcpCurrentVersion}
+        Update-SimpleNpmPackage -Name "pi ACP" -Package "pi-acp" -DisplayLabel "pi ACP SDK" -Step 10 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-PiAcpCurrentVersion}
     }
 
     if ($itemsToProcess -contains "context7-mcp") {
-        Update-LocalMcpPackage -Name "Context7 MCP" -PackageName "@upstash/context7-mcp" -DisplayLabel "Context7 MCP Server" -Step 12 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "@upstash/context7-mcp" }
+        Update-LocalMcpPackage -Name "Context7 MCP" -PackageName "@upstash/context7-mcp" -DisplayLabel "Context7 MCP Server" -Step 11 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "@upstash/context7-mcp" }
     }
 
     if ($itemsToProcess -contains "chrome-devtools-mcp") {
-        Update-LocalMcpPackage -Name "Chrome DevTools MCP" -PackageName "chrome-devtools-mcp" -DisplayLabel "Chrome DevTools MCP" -Step 13 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "chrome-devtools-mcp" }
+        Update-LocalMcpPackage -Name "Chrome DevTools MCP" -PackageName "chrome-devtools-mcp" -DisplayLabel "Chrome DevTools MCP" -Step 12 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "chrome-devtools-mcp" }
     }
 
     if ($itemsToProcess -contains "notebooklm-mcp") {
@@ -1777,15 +1692,15 @@ try {
     # ── Git-based repos ──
 
     if ($itemsToProcess -contains "gstack") {
-        Update-GitRepo -Name "gstack" -RepoPath "C:\Users\Administrator\plugins\gstack" -RemoteName "origin" -RemoteUrl "https://github.com/garrytan/gstack.git" -DisplayLabel "Gstack (Garry Tan)" -Step 15 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
+        Update-GitRepo -Name "gstack" -RepoPath "C:\Users\Administrator\plugins\gstack" -RemoteName "origin" -RemoteUrl "https://github.com/garrytan/gstack.git" -DisplayLabel "Gstack (Garry Tan)" -Step 14 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force
     }
 
     if ($itemsToProcess -contains "geo-seo") {
-        Update-GitRepo -Name "geo-seo-claude" -RepoPath "C:\Users\Administrator\Documents\Projects\geo-seo-claude" -RemoteName "origin" -RemoteUrl "https://github.com/zubair-trabzada/geo-seo-claude.git" -DisplayLabel "Geo-SEO Claude Skills" -Step 16 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
+        Update-GitRepo -Name "geo-seo-claude" -RepoPath "C:\Users\Administrator\Documents\Projects\geo-seo-claude" -RemoteName "origin" -RemoteUrl "https://github.com/zubair-trabzada/geo-seo-claude.git" -DisplayLabel "Geo-SEO Claude Skills" -Step 15 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force
     }
 
     if ($itemsToProcess -contains "last30days") {
-        Update-GitRepo -Name "last30days-skill" -RepoPath "C:\Users\Administrator\.qwen\skills\last30days" -RemoteName "origin" -RemoteUrl "https://github.com/mvanhorn/last30days-skill.git" -DisplayLabel "Last30Days Skill (mvanhorn)" -Step 17 -TotalSteps 17 -CheckOnly $CheckOnly -Force $Force
+        Update-GitRepo -Name "last30days-skill" -RepoPath "C:\Users\Administrator\.qwen\skills\last30days" -RemoteName "origin" -RemoteUrl "https://github.com/mvanhorn/last30days-skill.git" -DisplayLabel "Last30Days Skill (mvanhorn)" -Step 16 -TotalSteps 16 -CheckOnly $CheckOnly -Force $Force
     }
 
     # Summary

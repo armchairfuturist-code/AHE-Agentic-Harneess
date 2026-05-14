@@ -5,12 +5,17 @@
 #   .\update-plugins.ps1              - Check and update everything
 #   .\update-plugins.ps1 -CheckOnly   - Just report what would update
 #   .\update-plugins.ps1 -Force       - Force update even if up to date
-#   .\update-plugins.ps1 -Item qwen   - Only update a specific item (qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser)
+#   .\update-plugins.ps1 -Item qwen   - Only update a specific item
+#   .\update-plugins.ps1 -ListItems   - Show version table for all tools
+#
+# Items: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext,
+#        agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp,
+#        chrome-devtools-mcp, notebooklm-mcp
 
 param(
     [switch]$CheckOnly,
     [switch]$Force,
-    [string]$Item,           # "qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", or "" for all
+    [string]$Item,           # Single item name, or "" for all
     [switch]$ListItems,
     [switch]$Help
 )
@@ -26,8 +31,8 @@ $QwenDir         = "C:\Users\Administrator\.qwen"
 
 # ── Plugins / tools paths ────────────────────────────────────────────────────
 $CeExtensionDir  = [System.IO.Path]::Combine($QwenDir, "extensions", "compound-engineering")
-$GSDVersionFile  = [System.IO.Path]::Combine($QwenDir, "get-shit-done", "VERSION")
-$GSDWorkflowDir  = [System.IO.Path]::Combine($QwenDir, "get-shit-done", "workflows")
+$GSDVersionFile  = [System.IO.Path]::Combine($env:USERPROFILE, ".claude", "get-shit-done", "VERSION")
+$GSDWorkflowDir  = [System.IO.Path]::Combine($env:USERPROFILE, ".claude", "get-shit-done", "workflows")
 $RootedLeaderDir = "C:\Users\Administrator\Documents\Projects\rooted-leader-site"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -123,19 +128,25 @@ function Show-Help {
     Write-Color "Options:" -Color $Colors.Info
     Write-Host "  -CheckOnly       Just check for available updates, don't install"
     Write-Host "  -Force           Force update even if already up to date"
-    Write-Host "  -Item <name>     Only update one item (qwen, gsd, ce, rooted-leader)"
+    Write-Host "  -Item <name>     Only update one item"
     Write-Host "  -ListItems       List all tracked items and their versions"
     Write-Host "  -Help            Show this help message"
     Write-Host ""
     Write-Color "Items:" -Color $Colors.Info
-    Write-Host "  qwen            Qwen Code CLI (npm global package)"
-    Write-Host "  gsd             Get-Shit-Done workflow plugin (npm package)"
-    Write-Host "  ce              Compound Engineering extension (GitHub release)"
-    Write-Host "  rooted-leader   Rooted Leader Site (Firebase project)"
-    Write-Host "  rtk             RTK Token Saver CLI (GitHub release)"
-    Write-Host "  context-mode    Context-Mode MCP server (npm package)"
-    Write-Host "  autocontext     AutoContext Python package (pip / GitHub)"
-    Write-Host "  agent-browser   Agent Browser CLI (npm package)"
+    Write-Host "  qwen              Qwen Code CLI (npm global package)"
+    Write-Host "  gsd               Get-Shit-Done workflow plugin (npm package)"
+    Write-Host "  ce                Compound Engineering extension (GitHub release)"
+    Write-Host "  rooted-leader     Rooted Leader Site (Firebase project)"
+    Write-Host "  rtk               RTK Token Saver CLI (GitHub release)"
+    Write-Host "  context-mode      Context-Mode MCP server (npm package)"
+    Write-Host "  autocontext       AutoContext Python package (pip)"
+    Write-Host "  agent-browser     Agent Browser CLI (npm package)"
+    Write-Host "  squeez            Squeez token compressor (GitHub binary)"
+    Write-Host "  deepseek-tui      Deepseek TUI CLI (npm global package)"
+    Write-Host "  pi-acp            pi ACP SDK (npm global package)"
+    Write-Host "  context7-mcp      Context7 docs MCP (mcp-local node_modules)"
+    Write-Host "  chrome-devtools-mcp Chrome DevTools MCP (mcp-local node_modules)"
+    Write-Host "  notebooklm-mcp    NotebookLM MCP (pip package)"
 }
 
 function Show-ItemList {
@@ -150,6 +161,13 @@ function Show-ItemList {
     $cmVer   = "unknown"
     $acVer   = "unknown"
     $abVer   = "unknown"
+    $sqVer   = "unknown"
+    $dstVer  = "unknown"
+    $paVer   = "unknown"
+    $c7Ver   = "unknown"
+    $cdVer   = "unknown"
+    $agVer   = "unknown"
+    $nbVer   = "unknown"
 
     try {
         $v = npm list -g @qwen-code/qwen-code --depth=0 2>$null
@@ -179,13 +197,54 @@ function Show-ItemList {
 
     try {
         $av = pip show autocontext 2>$null | Out-String
-        if ($av -match '^Version: (\S+)') { $acVer = $Matches[1] }
+        if ($av -match 'Version:\s+(\S+)') { $acVer = $Matches[1] }
     } catch {}
 
     try {
         $abv = npm list -g agent-browser --depth=0 2>$null
         $abvt = $abv | Out-String
         if ($abvt -match 'agent-browser@(\S+)') { $abVer = $Matches[1] }
+    } catch {}
+
+    # Squeez — native binary version
+    try {
+        $sq = squeez --version 2>$null
+        if ($sq -match '\d+\.\d+\.\d+') { $sqVer = $Matches[0] }
+    } catch {}
+
+    # Deepseek TUI
+    try {
+        $ds = deepseek-tui --version 2>$null | Out-String
+        if ($ds -match 'v?(\d+\.\d+\.\d+)') { $dstVer = $Matches[1] }
+    } catch {}
+
+    # pi-acp
+    try {
+        $pa = npm list -g pi-acp --depth=0 2>$null | Out-String
+        if ($pa -match 'pi-acp@(\d+\.\d+\.\d+)') { $paVer = $Matches[1] }
+    } catch {}
+
+    # context7 MCP (local mcp install)
+    try {
+        $c7pkg = "$env:USERPROFILE\.qwen\mcp-local\node_modules\@upstash\context7-mcp\package.json"
+        if (Test-Path $c7pkg) { $c7Ver = (Get-Content $c7pkg -Raw | ConvertFrom-Json).version }
+    } catch {}
+
+    # chrome-devtools MCP (local mcp install)
+    try {
+        $cdpkg = "$env:USERPROFILE\.qwen\mcp-local\node_modules\chrome-devtools-mcp\package.json"
+        if (Test-Path $cdpkg) { $cdVer = (Get-Content $cdpkg -Raw | ConvertFrom-Json).version }
+    } catch {}
+
+    # agentmemory MCP — via npx, check npm registry version (always latest)
+    try {
+        $agVer = npm view @agentmemory/mcp version 2>$null
+    } catch {}
+
+    # notebooklm-mcp (pip)
+    try {
+        $nb = pip show notebooklm-mcp-cli 2>$null | Out-String
+        if ($nb -match 'Version:\s+(\S+)') { $nbVer = $Matches[1] }
     } catch {}
 
     Write-Host ""
@@ -227,6 +286,41 @@ function Show-ItemList {
     Write-Host "    Version: $abVer (installed)"
     Write-Host "    Source:  npm package agent-browser"
     Write-Host "    Update:  npm install -g agent-browser@latest"
+    Write-Host ""
+    Write-Color "  squeez          Squeez token compressor" -Color $Colors.Info
+    Write-Host "    Version: $sqVer (installed)"
+    Write-Host "    Source:  GitHub claudioemmanuel/squeez"
+    Write-Host "    Update:  download latest squeez-windows-x86_64.exe from releases"
+    Write-Host ""
+    Write-Color "  deepseek-tui    Deepseek TUI CLI" -Color $Colors.Info
+    Write-Host "    Version: $dstVer (installed)"
+    Write-Host "    Source:  npm global deepseek-tui"
+    Write-Host "    Update:  npm update -g deepseek-tui"
+    Write-Host ""
+    Write-Color "  pi-acp          pi ACP SDK" -Color $Colors.Info
+    Write-Host "    Version: $paVer (installed)"
+    Write-Host "    Source:  npm global pi-acp"
+    Write-Host "    Update:  npm update -g pi-acp"
+    Write-Host ""
+    Write-Color "  context7-mcp    Context7 docs MCP" -Color $Colors.Info
+    Write-Host "    Version: $c7Ver (installed)"
+    Write-Host "    Source:  @upstash/context7-mcp (mcp-local)"
+    Write-Host "    Update:  npm install @upstash/context7-mcp@latest in mcp-local"
+    Write-Host ""
+    Write-Color "  chrome-devtools-mcp Chrome DevTools MCP" -Color $Colors.Info
+    Write-Host "    Version: $cdVer (installed)"
+    Write-Host "    Source:  chrome-devtools-mcp (mcp-local)"
+    Write-Host "    Update:  npm install chrome-devtools-mcp@latest in mcp-local"
+    Write-Host ""
+    Write-Color "  agentmemory-mcp AgentMemory MCP" -Color $Colors.Info
+    Write-Host "    Version: $agVer (npm registry, fetched via npx)"
+    Write-Host "    Source:  @agentmemory/mcp (npx)"
+    Write-Host "    Update:  npx -y @agentmemory/mcp@latest"
+    Write-Host ""
+    Write-Color "  notebooklm-mcp  NotebookLM MCP" -Color $Colors.Info
+    Write-Host "    Version: $nbVer (installed)"
+    Write-Host "    Source:  pip package notebooklm-mcp"
+    Write-Host "    Update:  pip install -U notebooklm-mcp"
 }
 
 if ($Help) {
@@ -265,7 +359,7 @@ function Get-QwenLatestVersion {
 function Update-Qwen {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[1/8] Qwen Code CLI"
+    Write-Step "[1/14] Qwen Code CLI"
 
     $currentVer = Get-QwenCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -351,6 +445,8 @@ function Sync-GSD {
             if (Test-Path $dst) {
                 Copy-Item -Path "$dst\*" -Destination "$dst-backup" -Recurse -Force -ErrorAction SilentlyContinue
             }
+            # Ensure destination directory exists before copying
+            $null = New-Item -ItemType Directory -Path $dst -Force -ErrorAction SilentlyContinue
             Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force
             Write-Result "Synced from .claude to Qwen Code (v$LatestVer)" $true
         } else {
@@ -363,7 +459,7 @@ function Sync-GSD {
 function Update-GSD {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[2/8] Get-Shit-Done (GSD)"
+    Write-Step "[2/14] Get-Shit-Done (GSD)"
 
     $currentVer = Get-GSDCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -454,7 +550,7 @@ function Get-CELatestVersion {
 function Update-CE {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[3/8] Compound Engineering (CE)"
+    Write-Step "[3/14] Compound Engineering (CE)"
 
     $currentVer = Get-CECurrentVersion
     Write-Host "  Current:  $currentVer (extension)"
@@ -605,7 +701,7 @@ function Update-CE {
 function Check-RootedLeader {
     param([bool]$CheckOnly)
 
-    Write-Step "[4/8] Rooted Leader Site"
+    Write-Step "[4/14] Rooted Leader Site"
 
     if (-not (Test-Path $RootedLeaderDir)) {
         Write-Skip "Project directory not found at $RootedLeaderDir"
@@ -745,7 +841,7 @@ function Get-RTKLatestVersion {
 function Update-RTK {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[5/8] RTK Token Saver"
+    Write-Step "[5/14] RTK Token Saver"
 
     $currentVer = Get-RTKCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -798,9 +894,15 @@ function Update-RTK {
 
             $rtkExe = Get-ChildItem $extractDir -Recurse -Filter "rtk.exe" | Select-Object -First 1
             if ($rtkExe) {
-                $localBin = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-                if (Test-Path "C:\Users\Administrator\.local\bin") {
-                    $localBin = "C:\Users\Administrator\.local\bin"
+                # Detect the RTK binary that's actually on PATH (the one Get-Command resolves)
+                $activeRtk = (Get-Command rtk -ErrorAction SilentlyContinue).Source
+                if ($activeRtk -and (Test-Path $activeRtk)) {
+                    $localBin = Split-Path $activeRtk -Parent
+                } else {
+                    $localBin = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+                    if (Test-Path "C:\Users\Administrator\.local\bin") {
+                        $localBin = "C:\Users\Administrator\.local\bin"
+                    }
                 }
                 Copy-Item -Path $rtkExe.FullName -Destination "$localBin\rtk.exe" -Force
                 Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
@@ -856,7 +958,7 @@ function Get-ContextModeLatestVersion {
 function Update-ContextMode {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[6/8] Context-Mode MCP"
+    Write-Step "[6/14] Context-Mode MCP"
 
     $currentVer = Get-ContextModeCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -966,7 +1068,7 @@ function Get-AutoContextLatestVersion {
 function Update-AutoContext {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[7/8] AutoContext (Python)"
+    Write-Step "[7/14] AutoContext (Python)"
 
     $currentVer = Get-AutoContextCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -1044,7 +1146,7 @@ function Get-AgentBrowserLatestVersion {
 function Update-AgentBrowser {
     param([bool]$CheckOnly, [bool]$Force)
 
-    Write-Step "[8/8] Agent Browser CLI"
+    Write-Step "[8/14] Agent Browser CLI"
 
     $currentVer = Get-AgentBrowserCurrentVersion
     Write-Host "  Current:  $currentVer"
@@ -1098,8 +1200,319 @@ function Update-AgentBrowser {
 }
 
 # =============================================================================
-#  MAIN EXECUTION
+#  SQUEEZ UPDATE (native binary)
 # =============================================================================
+
+function Get-SqueezCurrentVersion {
+    try {
+        $sq = squeez --version 2>$null
+        if ($sq -match '(\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-SqueezLatestVersion {
+    try {
+        $url = "https://api.github.com/repos/claudioemmanuel/squeez/releases/latest"
+        $resp = Invoke-RestMethod -Uri $url -Headers @{ "Accept" = "application/vnd.github.v3+json" } -UseBasicParsing -ErrorAction Stop
+        $tag = $resp.tag_name
+        if ($tag -match 'v?(\d+\.\d+\.\d+)') { return $Matches[1] }
+        return ($tag -replace '^v', '')
+    } catch { return $null }
+}
+
+function Update-Squeez {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[9/14] Squeez Token Compressor"
+
+    $currentVer = Get-SqueezCurrentVersion
+    Write-Host "  Current:  $currentVer (binary)"
+    Write-Host "  Source:   GitHub claudioemmanuel/squeez"
+
+    $latestVer = Get-SqueezLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest squeez release from GitHub" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "Squeez $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Downloading squeez v$latestVer from GitHub releases..."
+            $dlUrl = "https://github.com/claudioemmanuel/squeez/releases/download/v$latestVer/squeez-windows-x86_64.exe"
+            $tmpExe = Join-Path $env:TEMP "squeez-$latestVer.exe"
+            Invoke-WebRequest -Uri $dlUrl -OutFile $tmpExe -UseBasicParsing -ErrorAction Stop
+
+            # Detect actual binary path (JS wrapper resolves from ~/.claude/squeez/bin/)
+            $binaryDir = "$env:USERPROFILE\.claude\squeez\bin"
+            $null = New-Item -ItemType Directory -Path $binaryDir -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path $tmpExe -Destination "$binaryDir\squeez.exe" -Force
+            Remove-Item -Path $tmpExe -Force -ErrorAction SilentlyContinue
+
+            $newVer = Get-SqueezCurrentVersion
+            Write-Result "Updated to $newVer" $true
+            Write-Log "Squeez updated: $currentVer -> $newVer (downloaded from GitHub)"
+        } catch {
+            Write-Result "Exception during squeez update: $_" $false
+            Write-Log "Squeez update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
+#  DEEPSEEK TUI & PI-ACP (npm global packages)
+# =============================================================================
+
+function Get-DeepseekTuiCurrentVersion {
+    try {
+        $v = deepseek-tui --version 2>$null | Out-String
+        if ($v -match 'v?(\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-PiAcpCurrentVersion {
+    try {
+        $v = npm list -g pi-acp --depth=0 2>$null | Out-String
+        if ($v -match 'pi-acp@(\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-NpmLatestVersion {
+    param([string]$Package)
+    try {
+        $ver = npm view $Package version 2>$null
+        if ($ver) { return $ver.Trim() }
+    } catch {}
+    return $null
+}
+
+function Update-SimpleNpmPackage {
+    param([string]$Name, [string]$Package, [string]$DisplayLabel, [int]$Step, [int]$TotalSteps, [bool]$CheckOnly, [bool]$Force, [scriptblock]$GetVerFn)
+
+    Write-Step "[$Step/$TotalSteps] $DisplayLabel"
+
+    $currentVer = & $GetVerFn
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   npm package $Package"
+
+    $latestVer = Get-NpmLatestVersion -Package $Package
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest $Name version from npm" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "$Name $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Running: npm install -g $Package@latest"
+            $output = npm install -g "$Package@latest" 2>&1
+            $exit = $LASTEXITCODE
+            if ($exit -eq 0) {
+                $newVer = & $GetVerFn
+                Write-Result "Updated to $newVer" $true
+                Write-Log "$Name updated: $currentVer -> $newVer"
+            } else {
+                Write-Result "npm install failed (exit $exit): $($output -join '; ')" $false
+                Write-Log "$Name update FAILED: npm exit $exit" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during $Name update: $_" $false
+            Write-Log "$Name update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+# =============================================================================
+#  MCP-LOCAL and PIP packages
+# =============================================================================
+
+function Get-LocalMcpVersion {
+    param([string]$PackageName)
+    $pkg = "$env:USERPROFILE\.qwen\mcp-local\node_modules\$PackageName\package.json"
+    if (Test-Path $pkg) {
+        try { return (Get-Content $pkg -Raw | ConvertFrom-Json).version } catch {}
+    }
+    return "unknown"
+}
+
+function Update-LocalMcpPackage {
+    param([string]$Name, [string]$PackageName, [string]$DisplayLabel, [int]$Step, [int]$TotalSteps, [bool]$CheckOnly, [bool]$Force, [scriptblock]$GetVerFn)
+
+    Write-Step "[$Step/$TotalSteps] $DisplayLabel"
+
+    $currentVer = & $GetVerFn
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   $PackageName (mcp-local)"
+
+    $latestVer = Get-NpmLatestVersion -Package $PackageName
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest $Name version from npm" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "$Name $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Installing $PackageName@latest in mcp-local..."
+            Push-Location "$env:USERPROFILE\.qwen\mcp-local"
+            $output = npm install "$PackageName@latest" 2>&1
+            $exit = $LASTEXITCODE
+            Pop-Location
+            if ($exit -eq 0) {
+                $newVer = & $GetVerFn
+                Write-Result "Updated to $newVer" $true
+                Write-Log "$Name updated: $currentVer -> $newVer"
+                Write-Color "  !! Restart Qwen Code to load updated MCP server" -Color $Colors.Warning
+            } else {
+                Write-Result "npm install failed (exit $exit): $($output -join '; ')" $false
+                Write-Log "$Name update FAILED: npm exit $exit" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during $Name update: $_" $false
+            Write-Log "$Name update exception: $_" -Level "ERROR"
+            try { Pop-Location } catch {}
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
+
+function Get-NotebookLmCurrentVersion {
+    try {
+        $nb = pip show notebooklm-mcp-cli 2>$null | Out-String
+        if ($nb -match 'Version:\s+(\S+)') { return $Matches[1] }
+    } catch {}
+    return "unknown"
+}
+
+function Get-NotebookLmLatestVersion {
+    try {
+        $ver = pip index versions notebooklm-mcp-cli 2>$null | Out-String
+        if ($ver -match 'Available versions: (.+)') {
+            $versions = $Matches[1] -split ',\s*'
+            return $versions[0].Trim()
+        }
+    } catch {}
+    return $null
+}
+
+function Update-NotebookLmMcp {
+    param([bool]$CheckOnly, [bool]$Force)
+
+    Write-Step "[14/14] NotebookLM MCP"
+
+    $currentVer = Get-NotebookLmCurrentVersion
+    Write-Host "  Current:  $currentVer"
+    Write-Host "  Source:   pip package notebooklm-mcp"
+
+    $latestVer = Get-NotebookLmLatestVersion
+    if ($latestVer -eq $null) { Write-Host "  Latest:   unknown" } else { Write-Host "  Latest:   $latestVer" }
+
+    if (-not $latestVer) {
+        Write-Result "Could not fetch latest notebooklm-mcp version from PyPI" $false
+        return
+    }
+
+    $status = Compare-SemVer -Current $currentVer -Latest $latestVer
+
+    if ($status -eq "outdated" -or ($status -eq "current" -and $Force)) {
+        $action = if ($status -eq "outdated") {
+            "Update available: $currentVer -> $latestVer"
+        } else {
+            "Already current at $currentVer (forced reinstall)"
+        }
+        Write-Color "  > $action" -Color $Colors.Warning
+
+        if ($CheckOnly) {
+            Write-Color "    (skipped - CheckOnly)" -Color $Colors.Muted
+            Write-Log "NotebookLM-MCP $currentVer -> $latestVer (would update, skipped -CheckOnly)"
+            return
+        }
+
+        try {
+            Write-Host "  Running: pip install -U notebooklm-mcp"
+            $output = pip install -U notebooklm-mcp 2>&1
+            $exit = $LASTEXITCODE
+            if ($exit -eq 0) {
+                $newVer = Get-NotebookLmCurrentVersion
+                Write-Result "Updated to $newVer" $true
+                Write-Log "NotebookLM-MCP updated: $currentVer -> $newVer"
+                Write-Color "  !! Restart Qwen Code to load updated MCP server" -Color $Colors.Warning
+            } else {
+                Write-Result "pip install failed (exit $exit)" $false
+                Write-Log "NotebookLM-MCP update FAILED: pip exit $exit" -Level "ERROR"
+            }
+        } catch {
+            Write-Result "Exception during notebooklm-mcp update: $_" $false
+            Write-Log "NotebookLM-MCP update exception: $_" -Level "ERROR"
+        }
+    } elseif ($status -eq "current") {
+        Write-Result "Already up to date at v$currentVer" $true
+    } else {
+        Write-Skip "Version comparison inconclusive (current=$currentVer, latest=$latestVer)"
+    }
+}
 
 try {
     # Determine which items to process
@@ -1107,21 +1520,27 @@ try {
 
     if ($Item) {
         switch ($Item.ToLower()) {
-            "qwen"          { $itemsToProcess = @("qwen") }
-            "gsd"           { $itemsToProcess = @("gsd") }
-            "ce"            { $itemsToProcess = @("ce") }
-            "rooted-leader" { $itemsToProcess = @("rooted-leader") }
-            "rtk"           { $itemsToProcess = @("rtk") }
-            "context-mode"  { $itemsToProcess = @("context-mode") }
-            "autocontext"   { $itemsToProcess = @("autocontext") }
-            "agent-browser" { $itemsToProcess = @("agent-browser") }
+            "qwen"              { $itemsToProcess = @("qwen") }
+            "gsd"               { $itemsToProcess = @("gsd") }
+            "ce"                { $itemsToProcess = @("ce") }
+            "rooted-leader"     { $itemsToProcess = @("rooted-leader") }
+            "rtk"               { $itemsToProcess = @("rtk") }
+            "context-mode"      { $itemsToProcess = @("context-mode") }
+            "autocontext"       { $itemsToProcess = @("autocontext") }
+            "agent-browser"     { $itemsToProcess = @("agent-browser") }
+            "squeez"            { $itemsToProcess = @("squeez") }
+            "deepseek-tui"      { $itemsToProcess = @("deepseek-tui") }
+            "pi-acp"            { $itemsToProcess = @("pi-acp") }
+            "context7-mcp"      { $itemsToProcess = @("context7-mcp") }
+            "chrome-devtools-mcp" { $itemsToProcess = @("chrome-devtools-mcp") }
+            "notebooklm-mcp"    { $itemsToProcess = @("notebooklm-mcp") }
             default {
-                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser" -Color $Colors.Error
+                Write-Color "Unknown item: $Item. Valid values: qwen, gsd, ce, rooted-leader, rtk, context-mode, autocontext, agent-browser, squeez, deepseek-tui, pi-acp, context7-mcp, chrome-devtools-mcp, notebooklm-mcp" -Color $Colors.Error
                 exit 1
             }
         }
     } else {
-        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser")
+        $itemsToProcess = @("qwen", "gsd", "ce", "rooted-leader", "rtk", "context-mode", "autocontext", "agent-browser", "squeez", "deepseek-tui", "pi-acp", "context7-mcp", "chrome-devtools-mcp", "notebooklm-mcp")
     }
 
     $hasUpdates = $false
@@ -1163,6 +1582,30 @@ try {
     if ($itemsToProcess -contains "agent-browser") {
         Update-AgentBrowser -CheckOnly $CheckOnly -Force $Force
         if (-not $CheckOnly -and (Get-AgentBrowserCurrentVersion) -ne (Get-AgentBrowserLatestVersion)) { $hasUpdates = $true }
+    }
+
+    if ($itemsToProcess -contains "squeez") {
+        Update-Squeez -CheckOnly $CheckOnly -Force $Force
+    }
+
+    if ($itemsToProcess -contains "deepseek-tui") {
+        Update-SimpleNpmPackage -Name "Deepseek TUI" -Package "deepseek-tui" -DisplayLabel "Deepseek TUI CLI" -Step 10 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-DeepseekTuiCurrentVersion}
+    }
+
+    if ($itemsToProcess -contains "pi-acp") {
+        Update-SimpleNpmPackage -Name "pi ACP" -Package "pi-acp" -DisplayLabel "pi ACP SDK" -Step 11 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn ${function:Get-PiAcpCurrentVersion}
+    }
+
+    if ($itemsToProcess -contains "context7-mcp") {
+        Update-LocalMcpPackage -Name "Context7 MCP" -PackageName "@upstash/context7-mcp" -DisplayLabel "Context7 MCP Server" -Step 12 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "@upstash/context7-mcp" }
+    }
+
+    if ($itemsToProcess -contains "chrome-devtools-mcp") {
+        Update-LocalMcpPackage -Name "Chrome DevTools MCP" -PackageName "chrome-devtools-mcp" -DisplayLabel "Chrome DevTools MCP" -Step 13 -TotalSteps 14 -CheckOnly $CheckOnly -Force $Force -GetVerFn { Get-LocalMcpVersion -PackageName "chrome-devtools-mcp" }
+    }
+
+    if ($itemsToProcess -contains "notebooklm-mcp") {
+        Update-NotebookLmMcp -CheckOnly $CheckOnly -Force $Force
     }
 
     # Summary

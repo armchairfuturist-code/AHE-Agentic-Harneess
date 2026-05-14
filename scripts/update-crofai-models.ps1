@@ -287,7 +287,7 @@ try {
         if (Test-Path $gsdModelsPath) {
             $gsdConfig = Get-Content $gsdModelsPath -Raw -Encoding UTF8 | ConvertFrom-Json
             $gsdConfig.providers.crofai.models = $gsdModels
-            $gsdConfig | ConvertTo-Json -Depth 10 -Compress | Set-Content $gsdModelsPath -Encoding UTF8 -NoNewline
+            [IO.File]::WriteAllText($gsdModelsPath, ($gsdConfig | ConvertTo-Json -Depth 10 -Compress))
             Write-Color "  GSD2: $($gsdModels.Count) models updated" -Color $Colors.Success
         } else {
             Write-Color "  GSD2: models.json not found at $gsdModelsPath" -Color $Colors.Warning
